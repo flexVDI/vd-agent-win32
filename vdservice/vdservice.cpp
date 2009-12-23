@@ -20,6 +20,7 @@
 #include <wtsapi32.h>
 #include <userenv.h>
 #include <stdio.h>
+#include <tlhelp32.h>
 #include "vdcommon.h"
 #include "vdi_port.h"
 #include "mutex.h"
@@ -35,6 +36,9 @@
 #define VD_AGENT_RESTART_INTERVAL 3000
 #define VD_AGENT_RESTART_COUNT_RESET_INTERVAL 60000
 #define VD_EVENTS_COUNT         4
+#define WINLOGON_FILENAME       TEXT("winlogon.exe")
+#define CREATE_PROC_MAX_RETRIES 10
+#define CREATE_PROC_INTERVAL_MS 500
 
 class VDService {
 public:
@@ -78,6 +82,7 @@ private:
     DWORD _chunk_size;
     DWORD _last_agent_restart_time;
     int _agent_restarts;
+    int _system_version;
     bool _pipe_connected;
     bool _pending_reset;
     bool _pending_write;
@@ -95,6 +100,31 @@ VDService* VDService::get()
         _singleton = new VDService();
     }
     return (VDService*)_singleton;
+}
+
+enum SystemVersion {
+    SYS_VER_UNSUPPORTED,
+    SYS_VER_WIN_XP,
+    SYS_VER_WIN_7,
+};
+
+int supported_system_version()
+{
+    OSVERSIONINFOEX osvi;
+
+    ZeroMemory(&osvi, sizeof(OSVERSIONINFOEX));
+    osvi.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEX);
+    if (!GetVersionEx((OSVERSIONINFO*)&osvi)) {
+        vd_printf("GetVersionEx() failed: %u", GetLastError());
+        return 0;
+    }
+    if (osvi.dwMajorVersion == 5 && osvi.dwMinorVersion == 1) {
+        return SYS_VER_WIN_XP;
+    } else if (osvi.dwMajorVersion == 6 && osvi.dwMinorVersion == 1 &&
+                               osvi.wProductType == VER_NT_WORKSTATION) {
+        return SYS_VER_WIN_7;
+    }
+    return 0;
 }
 
 VDService::VDService()
@@ -117,6 +147,7 @@ VDService::VDService()
     ZeroMemory(&_agent_proc_info, sizeof(_agent_proc_info));
     ZeroMemory(&_pipe_state, sizeof(_pipe_state));
     ZeroMemory(_events, sizeof(_events));
+    _system_version = supported_system_version();
     _control_event = CreateEvent(NULL, FALSE, FALSE, NULL);
     _pipe_state.read.overlap.hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
     _agent_path[0] = wchar_t('\0');
@@ -237,7 +268,7 @@ DWORD WINAPI VDService::control_handler(DWORD control, DWORD event_type, LPVOID 
         DWORD session_id = ((WTSSESSION_NOTIFICATION*)event_data)->dwSessionId;
         vd_printf("Session %u %s", session_id, session_events[event_type]);
         SetServiceStatus(s->_status_handle, &s->_status);
-        if (event_type == WTS_CONSOLE_CONNECT) {
+        if (s->_system_version != SYS_VER_UNSUPPORTED && event_type == WTS_CONSOLE_CONNECT) {
             s->_session_id = session_id;
             if (!s->restart_agent(true)) {
                 s->stop();
@@ -412,7 +443,11 @@ bool VDService::execute()
                 break;
             case WAIT_OBJECT_0 + 3:
                 vd_printf("Agent killed");
-                restart_agent(false);
+                if (_system_version == SYS_VER_WIN_XP) {
+                    restart_agent(false);
+                } else if (_system_version == SYS_VER_WIN_7) {
+                    kill_agent();
+                }
                 break;
             case WAIT_IO_COMPLETION:
             case WAIT_TIMEOUT:
@@ -600,20 +635,70 @@ BOOL create_session_process_as_user(IN DWORD session_id, IN BOOL use_default_tok
     return ret;
 }
 
-bool supported_system_version()
+BOOL create_process_as_user(IN DWORD session_id, IN LPCWSTR application_name,
+                            IN LPWSTR command_line, IN LPSECURITY_ATTRIBUTES process_attributes,
+                            IN LPSECURITY_ATTRIBUTES thread_attributes, IN BOOL inherit_handles,
+                            IN DWORD creation_flags, IN LPVOID environment,
+                            IN LPCWSTR current_directory, IN LPSTARTUPINFOW startup_info,
+                            OUT LPPROCESS_INFORMATION process_information)
 {
-    OSVERSIONINFOEX osvi;
+    PROCESSENTRY32 proc_entry;
+    DWORD winlogon_pid = 0;
+    HANDLE winlogon_proc;
+    HANDLE token = NULL;
+    HANDLE token_dup;
+    BOOL ret = FALSE;
 
-    ZeroMemory(&osvi, sizeof(OSVERSIONINFOEX));
-    osvi.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
-    if (!GetVersionEx((OSVERSIONINFO*)&osvi)) {
-        vd_printf("GetVersionEx() failed: %u", GetLastError());
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) {
+        vd_printf("CreateToolhelp32Snapshot() failed %u", GetLastError());
         return false;
     }
-    if (osvi.dwMajorVersion == 5 && osvi.dwMinorVersion == 1) {
-        return true;
+    ZeroMemory(&proc_entry, sizeof(proc_entry));
+    proc_entry.dwSize = sizeof(PROCESSENTRY32);
+    if (!Process32First(snap, &proc_entry)) {
+        vd_printf("Process32First() failed %u", GetLastError());
+        CloseHandle(snap);
+        return false;
     }
-    return false;
+    do {
+        if (_tcsicmp(proc_entry.szExeFile, WINLOGON_FILENAME) == 0) {
+            DWORD winlogon_session_id = 0;
+            if (ProcessIdToSessionId(proc_entry.th32ProcessID, &winlogon_session_id) &&
+                                                      winlogon_session_id == session_id) {
+                winlogon_pid = proc_entry.th32ProcessID;
+                break;
+            }
+        }
+    } while (Process32Next(snap, &proc_entry));
+    CloseHandle(snap);
+    if (winlogon_pid == 0) {
+        vd_printf("Winlogon not found");
+        return false;
+    }
+    winlogon_proc = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, winlogon_pid);
+    if (!winlogon_proc) {
+        vd_printf("OpenProcess() failed %u", GetLastError());
+        return false;
+    }
+    ret = OpenProcessToken(winlogon_proc, TOKEN_DUPLICATE, &token);
+    CloseHandle(winlogon_proc);
+    if (!ret) {
+        vd_printf("OpenProcessToken() failed %u", GetLastError());
+        return false;
+    }
+    ret = DuplicateTokenEx(token, MAXIMUM_ALLOWED, NULL, SecurityIdentification, TokenPrimary,
+                           &token_dup);
+    CloseHandle(token);
+    if (!ret) {
+        vd_printf("DuplicateTokenEx() failed %u", GetLastError());
+        return false;
+    }
+    ret = CreateProcessAsUser(token_dup, application_name, command_line, process_attributes,
+                              thread_attributes, inherit_handles, creation_flags, environment,
+                              current_directory, startup_info, process_information);
+    CloseHandle(token_dup);
+    return ret;
 }
 
 bool VDService::launch_agent()
@@ -625,24 +710,29 @@ bool VDService::launch_agent()
     startup_info.cb = sizeof(startup_info);
     startup_info.lpDesktop = TEXT("Winsta0\\winlogon");
     ZeroMemory(&_agent_proc_info, sizeof(_agent_proc_info));
-    if (_session_id == 0) {
-        ret = CreateProcess(_agent_path, _agent_path, NULL, NULL, FALSE, 0, NULL, NULL,
-                            &startup_info, &_agent_proc_info);
-    } else {
-        if (!supported_system_version()) {
-            vd_printf("create_session_process_as_user is not supported by this system version");
-            return false;
-        }
-        for (int i = 0; i < 20; i++) {
-            ret = create_session_process_as_user(_session_id, TRUE, NULL, NULL, _agent_path, NULL,
-                                                 NULL, FALSE, 0, NULL, NULL, &startup_info,
-                                                 &_agent_proc_info);
-            if (ret) {
-                vd_printf("create_session_process_as_user #%d", i);
-                break;
+    if (_system_version == SYS_VER_WIN_XP) {
+        if (_session_id == 0) {
+            ret = CreateProcess(_agent_path, _agent_path, NULL, NULL, FALSE, 0, NULL, NULL,
+                                &startup_info, &_agent_proc_info);
+        } else {
+            for (int i = 0; i < CREATE_PROC_MAX_RETRIES; i++) {
+                ret = create_session_process_as_user(_session_id, TRUE, NULL, NULL, _agent_path,
+                                                     NULL, NULL, FALSE, 0, NULL, NULL,
+                                                     &startup_info, &_agent_proc_info);
+                if (ret) {
+                    vd_printf("create_session_process_as_user #%d", i);
+                    break;
+                }
+                Sleep(CREATE_PROC_INTERVAL_MS);
             }
-            Sleep(500);
         }
+    } else if (_system_version == SYS_VER_WIN_7) {
+        startup_info.lpDesktop = TEXT("Winsta0\\default");
+        ret = create_process_as_user(_session_id, _agent_path, _agent_path, NULL, NULL, FALSE, 0,
+                                     NULL, NULL, &startup_info, &_agent_proc_info);
+    } else {
+        vd_printf("Not supported in this system version");
+        return false;
     }
     if (!ret) {
         vd_printf("CreateProcess() failed: %u", GetLastError());
@@ -654,7 +744,7 @@ bool VDService::launch_agent()
         return false;
     }
     vd_printf("Wait for vdagent to connect");
-    if (ConnectNamedPipe(_pipe_state.pipe, NULL)) {
+    if (ConnectNamedPipe(_pipe_state.pipe, NULL) || GetLastError() == ERROR_PIPE_CONNECTED) {
         _pipe_connected = true;
         _pending_reset = false;
         vd_printf("Pipe connected by vdagent");
@@ -929,6 +1019,10 @@ void VDService::write_agent_control(uint32_t type, uint32_t opaque)
 
 int _tmain(int argc, TCHAR* argv[], TCHAR* envp[])
 {
+    if (!supported_system_version()) {
+        printf("vdservice is not supported in this system version\n");
+        return 0;
+    }
     VDService* vdservice = VDService::get();
     if (argc > 1) {
         if (lstrcmpi(argv[1], TEXT("install")) == 0) {

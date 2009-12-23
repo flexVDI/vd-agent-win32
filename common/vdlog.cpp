@@ -84,6 +84,7 @@ void log_version()
     DWORD handle;
     TCHAR module_fname[MAX_PATH];
     TCHAR* info_buf = NULL;
+
     try {
         if (!GetModuleFileName(NULL, module_fname, MAX_PATH)) {
             throw;
@@ -110,5 +111,5 @@ void log_version()
     } catch (...) {
         vd_printf("get version info failed");
     }
-     delete[] info_buf;
+    delete[] info_buf;
 }
