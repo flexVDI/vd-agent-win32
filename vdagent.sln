@@ -1,6 +1,6 @@
 ﻿
-Microsoft Visual Studio Solution File, Format Version 9.00
-# Visual Studio 2005
+Microsoft Visual Studio Solution File, Format Version 10.00
+# Visual Studio 2008
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "vdagent", "vdagent\vdagent.vcproj", "{CAD5A7E6-E9F5-4071-AFDA-25F76FDA5442}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "vdservice", "vdservice\vdservice.vcproj", "{ADFE5E22-31D0-4343-AE9E-8102CC0051F9}"
