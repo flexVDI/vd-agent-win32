@@ -44,9 +44,9 @@ class VDService {
 public:
     static VDService* get();
     ~VDService();
-    void run();
-    void install();
-    void uninstall();
+    bool run();
+    bool install();
+    bool uninstall();
 
 private:
     VDService();
@@ -162,24 +162,26 @@ VDService::~VDService()
     delete _log;
 }
 
-void VDService::run()
+bool VDService::run()
 {
     SERVICE_TABLE_ENTRY service_table[] = {{VD_SERVICE_NAME, main}, {0, 0}};
-    StartServiceCtrlDispatcher(service_table);
+    return !!StartServiceCtrlDispatcher(service_table);
 }
 
-void VDService::install()
+bool VDService::install()
 {
+    bool ret = false;
+
     SC_HANDLE service_control_manager = OpenSCManager(0, 0, SC_MANAGER_CREATE_SERVICE);
     if (!service_control_manager) {
         printf("OpenSCManager failed\n");
-        return;
+        return false;
     }
     TCHAR path[_MAX_PATH + 1];
     if (!GetModuleFileName(0, path, sizeof(path) / sizeof(path[0]))) {
         printf("GetModuleFileName failed\n");
         CloseServiceHandle(service_control_manager);
-        return;
+        return false;
     }
     SC_HANDLE service = CreateService(service_control_manager, VD_SERVICE_NAME,
                                       VD_SERVICE_DISPLAY_NAME, SERVICE_ALL_ACCESS,
@@ -194,27 +196,32 @@ void VDService::install()
         }
         CloseServiceHandle(service);
         printf("Service installed successfully\n");
+        ret = true;
     } else if (GetLastError() == ERROR_SERVICE_EXISTS) {
         printf("Service already exists\n");
+        ret = true;
     } else {
         printf("Service not installed successfully, error %d\n", GetLastError());
     }
     CloseServiceHandle(service_control_manager);
+    return ret;
 }
 
-void VDService::uninstall()
+bool VDService::uninstall()
 {
+    bool ret = false;
+
     SC_HANDLE service_control_manager = OpenSCManager(0, 0, SC_MANAGER_CONNECT);
     if (!service_control_manager) {
         printf("OpenSCManager failed\n");
-        return;
+        return false;
     }
     SC_HANDLE service = OpenService(service_control_manager, VD_SERVICE_NAME,
                                     SERVICE_QUERY_STATUS | DELETE);
     if (!service) {
         printf("OpenService failed\n");
         CloseServiceHandle(service_control_manager);
-        return;
+        return false;
     }
     SERVICE_STATUS status;
     if (!QueryServiceStatus(service, &status)) {
@@ -223,6 +230,7 @@ void VDService::uninstall()
         printf("Service is still running\n");
     } else if (DeleteService(service)) {
         printf("Service removed successfully\n");
+        ret = true;
     } else {
         switch (GetLastError()) {
         case ERROR_ACCESS_DENIED:
@@ -238,6 +246,7 @@ void VDService::uninstall()
     }
     CloseServiceHandle(service);
     CloseServiceHandle(service_control_manager);
+    return ret;
 }
 
 const char* session_events[] = {
@@ -1019,23 +1028,25 @@ void VDService::write_agent_control(uint32_t type, uint32_t opaque)
 
 int _tmain(int argc, TCHAR* argv[], TCHAR* envp[])
 {
+    bool success = false;
+
     if (!supported_system_version()) {
         printf("vdservice is not supported in this system version\n");
-        return 0;
+        return -1;
     }
     VDService* vdservice = VDService::get();
     if (argc > 1) {
         if (lstrcmpi(argv[1], TEXT("install")) == 0) {
-            vdservice->install();
+            success = vdservice->install();
         } else if (lstrcmpi(argv[1], TEXT("uninstall")) == 0) {
-            vdservice->uninstall();
+            success = vdservice->uninstall();
         } else {
             printf("Use: vdservice install / uninstall\n");
         }
     } else {
-        vdservice->run();
+        success = vdservice->run();
     }
     delete vdservice;
-    return 0;
+    return (success ? 0 : -1);
 }
 
