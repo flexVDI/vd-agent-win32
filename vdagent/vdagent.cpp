@@ -262,7 +262,7 @@ DWORD VDAgent::get_buttons_change(DWORD last_buttons_state, DWORD new_buttons_st
 
 bool VDAgent::send_input()
 {
-    UINT ret;
+    bool ret = true;
     _desktop_layout->lock();
     if (_pending_input) {
         if (KillTimer(_hwnd, VD_TIMER_ID)) {
@@ -274,14 +274,13 @@ bool VDAgent::send_input()
             return false;
         }
     }
-    ret = SendInput(1, &_input, sizeof(INPUT));
-    if (!ret) {
+    if (!SendInput(1, &_input, sizeof(INPUT)) && GetLastError() != ERROR_ACCESS_DENIED) {
         vd_printf("SendInput failed: %d", GetLastError());
-        _running = false;
+        ret = _running = false;
     }
     _input_time = GetTickCount();
     _desktop_layout->unlock();
-    return !!ret;
+    return ret;
 }
 
 bool VDAgent::handle_mouse_event(VDAgentMouseState* state)
