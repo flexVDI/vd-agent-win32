@@ -33,12 +33,14 @@ typedef CRITICAL_SECTION mutex_t;
 #define VD_SERVICE_PIPE_NAME   TEXT("\\\\.\\pipe\\vdservicepipe")
 #define VD_MESSAGE_HEADER_SIZE (sizeof(VDPipeMessage) + sizeof(VDAgentMessage))
 #define VD_PIPE_BUF_SIZE       (1024 * 1024)
+#define VD_AGENT_REGISTRY_KEY "SOFTWARE\\Red Hat\\Spice\\vdagent\\"
 
 enum {
     VD_AGENT_COMMAND,
     VD_AGENT_RESET,
     VD_AGENT_RESET_ACK,
     VD_AGENT_QUIT,
+    VD_AGENT_SESSION_LOGON,
 };
 
 typedef __declspec (align(1)) struct VDPipeMessage {

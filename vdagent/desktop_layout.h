@@ -42,6 +42,7 @@ public:
     void set_pos(LONG x, LONG y) { _pos_x = x; _pos_y = y;}
     void move_pos(LONG x, LONG y) { _pos_x += x; _pos_y += y;}
     void set_res(DWORD width, DWORD height, DWORD depth);
+    void set_depth(DWORD depth) { _depth = depth;}
     void set_attached(bool attached) { _attached = attached;}
 
 private:

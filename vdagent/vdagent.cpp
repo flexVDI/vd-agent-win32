@@ -17,6 +17,7 @@
 
 #include "vdcommon.h"
 #include "desktop_layout.h"
+#include "display_setting.h"
 #include <lmcons.h>
 
 //#define CLIPBOARD_ENABLED
@@ -38,6 +39,7 @@ private:
     bool handle_mouse_event(VDAgentMouseState* state);
     bool handle_mon_config(VDAgentMonitorsConfig* mon_config, uint32_t port);
     bool handle_clipboard(VDAgentClipboard* clipboard, uint32_t size);
+    bool handle_display_config(VDAgentDisplayConfig* display_config, uint32_t port);
     bool handle_control(VDPipeMessage* msg);
     bool on_clipboard_change();
     DWORD get_buttons_change(DWORD last_buttons_state, DWORD new_buttons_state,
@@ -52,6 +54,8 @@ private:
     bool write_clipboard();
     bool connect_pipe();
     bool send_input();
+    void set_display_depth(uint32_t depth);
+    void load_display_setting();
 
 private:
     static VDAgent* _singleton;
@@ -73,8 +77,14 @@ private:
     bool _pending_write;
     bool _running;
     DesktopLayout* _desktop_layout;
+    DisplaySetting _display_setting;
     VDPipeState _pipe_state;
     mutex_t _write_mutex;
+
+    bool _logon_desktop;
+    bool _display_setting_initialized;
+    bool _logon_occured;
+
     VDLog* _log;
 };
 
@@ -105,6 +115,9 @@ VDAgent::VDAgent()
     , _pending_write (false)
     , _running (false)
     , _desktop_layout (NULL)
+    , _display_setting (VD_AGENT_REGISTRY_KEY)
+    , _logon_desktop (false)
+    , _display_setting_initialized (false)
     , _log (NULL)
 {
     TCHAR log_path[MAX_PATH];
@@ -233,6 +246,25 @@ void VDAgent::input_desktop_message_loop()
     } else {
         vd_printf("GetUserObjectInformation failed %u", GetLastError());
     }
+
+    // loading the display settings for the current session's logged on user only
+    // after 1) we receive logon event, and 2) the desktop switched from Winlogon
+    if (_tcscmp(desktop_name, TEXT("Winlogon")) == 0) {
+        _logon_desktop = true;
+    } else {
+        // first load after connection
+        if (!_display_setting_initialized) {
+            vd_printf("First display setting");
+            _display_setting.load();
+            _display_setting_initialized = true;
+        } else if (_logon_occured && _logon_desktop) {
+            vd_printf("LOGON display setting");
+            _display_setting.load();
+        }
+        _logon_occured = false;
+        _logon_desktop = false;
+    }
+
     _hwnd = CreateWindow(VD_AGENT_WINCLASS_NAME, NULL, 0, 0, 0, 0, 0, NULL, NULL, NULL, NULL);
     if (!_hwnd) {
         vd_printf("CreateWindow() failed: %u", GetLastError());
@@ -466,6 +498,80 @@ bool VDAgent::handle_clipboard(VDAgentClipboard* clipboard, uint32_t size)
     return ret;
 }
 
+void VDAgent::set_display_depth(uint32_t depth)
+{
+    size_t display_count;
+
+    display_count = _desktop_layout->get_display_count();
+
+    // setting depth for all the monitors, including unattached ones
+    for (uint32_t i = 0; i < display_count; i++) {
+        DisplayMode* mode = _desktop_layout->get_display(i);
+        ASSERT(mode);
+        mode->set_depth(depth);
+    }
+
+    if (display_count) {
+        _desktop_layout->set_displays();
+    }
+}
+
+
+void VDAgent::load_display_setting()
+{
+    _display_setting.load();
+}
+
+bool VDAgent::handle_display_config(VDAgentDisplayConfig* display_config, uint32_t port)
+{
+    DisplaySettingOptions disp_setting_opts;
+    VDPipeMessage* reply_pipe_msg;
+    VDAgentMessage* reply_msg;
+    VDAgentReply* reply;
+    DWORD msg_size;
+
+    if (display_config->flags & VD_AGENT_DISPLAY_CONFIG_FLAG_DISABLE_WALLPAPER) {
+        disp_setting_opts._disable_wallpaper = TRUE;
+    }
+
+    if (display_config->flags & VD_AGENT_DISPLAY_CONFIG_FLAG_DISABLE_FONT_SMOOTH) {
+       disp_setting_opts._disable_font_smoothing = TRUE;
+    }
+
+    if (display_config->flags & VD_AGENT_DISPLAY_CONFIG_FLAG_DISABLE_ANIMATION) {
+        disp_setting_opts._disable_animation = TRUE;
+    }
+
+    _display_setting.set(disp_setting_opts);
+
+    if (display_config->flags & VD_AGENT_DISPLAY_CONFIG_FLAG_SET_COLOR_DEPTH) {
+        set_display_depth(display_config->depth);
+    }
+
+    msg_size = VD_MESSAGE_HEADER_SIZE + sizeof(VDAgentReply);
+    reply_pipe_msg = (VDPipeMessage*)write_lock(msg_size);
+    if (!reply_pipe_msg) {
+        return false;
+    }
+
+    reply_pipe_msg->type = VD_AGENT_COMMAND;
+    reply_pipe_msg->opaque = port;
+    reply_pipe_msg->size = sizeof(VDAgentMessage) + sizeof(VDAgentReply);
+    reply_msg = (VDAgentMessage*)reply_pipe_msg->data;
+    reply_msg->protocol = VD_AGENT_PROTOCOL;
+    reply_msg->type = VD_AGENT_REPLY;
+    reply_msg->opaque = 0;
+    reply_msg->size = sizeof(VDAgentReply);
+    reply = (VDAgentReply*)reply_msg->data;
+    reply->type = VD_AGENT_DISPLAY_CONFIG;
+    reply->error = VD_AGENT_SUCCESS;
+    write_unlock(msg_size);
+    if (!_pending_write) {
+        write_completion(0, 0, &_pipe_state.write.overlap);
+    }
+    return true;
+}
+
 bool VDAgent::handle_control(VDPipeMessage* msg)
 {
     switch (msg->type) {
@@ -483,6 +589,17 @@ bool VDAgent::handle_control(VDPipeMessage* msg)
         }
         break;
     }
+    case VD_AGENT_SESSION_LOGON:
+        vd_printf("session logon");
+        // loading the display settings for the current session's logged on user only
+        // after 1) we receive logon event, and 2) the desktop switched from Winlogon
+        if (!_logon_desktop) {
+            vd_printf("LOGON display setting");
+            _display_setting.load();
+        } else {
+            _logon_occured = true;
+        }
+        break;
     case VD_AGENT_QUIT:
         vd_printf("Agent quit");
         _running = false;
@@ -619,6 +736,12 @@ void VDAgent::dispatch_message(VDAgentMessage* msg, uint32_t port)
         }
         break;
 #endif // CLIPBOARD_ENABLED
+    case VD_AGENT_DISPLAY_CONFIG:
+        if (!a->handle_display_config((VDAgentDisplayConfig*)msg->data, port)) {
+            vd_printf("handle_display_config failed");
+            a->_running = false;
+        }        
+        break;
     default:
         vd_printf("Unsupported message type %u size %u", msg->type, msg->size);
     }
