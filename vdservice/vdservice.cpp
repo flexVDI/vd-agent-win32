@@ -34,10 +34,18 @@
 #define VD_AGENT_MAX_RESTARTS   10
 #define VD_AGENT_RESTART_INTERVAL 3000
 #define VD_AGENT_RESTART_COUNT_RESET_INTERVAL 60000
-#define VD_EVENTS_COUNT         5
 #define WINLOGON_FILENAME       TEXT("winlogon.exe")
 #define CREATE_PROC_MAX_RETRIES 10
 #define CREATE_PROC_INTERVAL_MS 500
+
+enum {
+    VD_EVENT_PIPE_READ = 0,
+    VD_EVENT_CONTROL,
+    VD_EVENT_READ,
+    VD_EVENT_WRITE,
+    VD_EVENT_AGENT, // Must be before last
+    VD_EVENTS_COUNT // Must be last
+};
 
 class VDService {
 public:
@@ -399,11 +407,11 @@ bool VDService::execute()
         return false;
     }
     vd_printf("Connected to server");
-    _events[0] = _pipe_state.read.overlap.hEvent;
-    _events[1] = _control_event;
-    _events[2] = _vdi_port->get_read_event();
-    _events[3] = _vdi_port->get_write_event();
-    _events[4] = _agent_proc_info.hProcess;
+    _events[VD_EVENT_PIPE_READ] = _pipe_state.read.overlap.hEvent;
+    _events[VD_EVENT_CONTROL] = _control_event;
+    _events[VD_EVENT_READ] = _vdi_port->get_read_event();
+    _events[VD_EVENT_WRITE] = _vdi_port->get_write_event();
+    _events[VD_EVENT_AGENT] = _agent_proc_info.hProcess;
     _chunk_size = _chunk_port = 0;
     read_pipe();
     while (_running) {
@@ -424,12 +432,11 @@ bool VDService::execute()
             handle_port_data();
         }
         if (_running && (!cont || _pending_read || _pending_write)) {
-            DWORD events_count = _events[VD_EVENTS_COUNT - 1] ? VD_EVENTS_COUNT :
-                                                                VD_EVENTS_COUNT - 1;
+            DWORD events_count = _events[VD_EVENT_AGENT] ? VD_EVENTS_COUNT : VD_EVENTS_COUNT - 1;
             DWORD wait_ret = WaitForMultipleObjectsEx(events_count, _events, FALSE,
                                                       cont ? 0 : INFINITE, TRUE);
             switch (wait_ret) {
-            case WAIT_OBJECT_0 + 0: {
+            case WAIT_OBJECT_0 + VD_EVENT_PIPE_READ: {
                 DWORD bytes = 0;
                 if (_pipe_connected && _pending_read) {
                     _pending_read = false;
@@ -445,16 +452,16 @@ bool VDService::execute()
                 }
                 break;
             }
-            case WAIT_OBJECT_0 + 1:
+            case WAIT_OBJECT_0 + VD_EVENT_CONTROL:
                 vd_printf("Control event");
                 break;
-            case WAIT_OBJECT_0 + 2:
+            case WAIT_OBJECT_0 + VD_EVENT_READ:
                 _vdi_port->read_completion();
                 break;
-            case WAIT_OBJECT_0 + 3:
+            case WAIT_OBJECT_0 + VD_EVENT_WRITE:
                 _vdi_port->write_completion();
                 break;
-            case WAIT_OBJECT_0 + 4:
+            case WAIT_OBJECT_0 + VD_EVENT_AGENT:
                 vd_printf("Agent killed");
                 if (_system_version == SYS_VER_WIN_XP) {
                     restart_agent(false);
@@ -765,7 +772,7 @@ bool VDService::launch_agent()
         vd_printf("ConnectNamedPipe() failed: %u", GetLastError());
         return false;
     }
-    _events[VD_EVENTS_COUNT - 1] = _agent_proc_info.hProcess;
+    _events[VD_EVENT_AGENT] = _agent_proc_info.hProcess;
     return true;
 }
 
@@ -778,7 +785,7 @@ bool VDService::kill_agent()
     if (!_agent_alive) {
         return true;
     }
-    _events[VD_EVENTS_COUNT - 1] = 0;
+    _events[VD_EVENT_AGENT] = 0;
     _agent_alive = false;
     if (_pipe_connected) {
         _pipe_connected = false;
