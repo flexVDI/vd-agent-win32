@@ -24,6 +24,8 @@
 #include "vdcommon.h"
 #include "vdi_port.h"
 
+//#define DEBUG_VDSERVICE
+
 #define VD_SERVICE_DISPLAY_NAME TEXT("RHEV Spice Agent")
 #define VD_SERVICE_NAME         TEXT("vdservice")
 #define VD_SERVICE_DESCRIPTION  TEXT("Enables Spice event injection and display configuration.")
@@ -171,8 +173,13 @@ VDService::~VDService()
 
 bool VDService::run()
 {
+#ifndef DEBUG_VDSERVICE
     SERVICE_TABLE_ENTRY service_table[] = {{VD_SERVICE_NAME, main}, {0, 0}};
     return !!StartServiceCtrlDispatcher(service_table);
+#else
+    main(0, NULL);
+    return true;
+#endif
 }
 
 bool VDService::install()
@@ -336,7 +343,9 @@ VOID WINAPI VDService::main(DWORD argc, TCHAR* argv[])
                                                      NULL);
     if (!s->_status_handle) {
         printf("RegisterServiceCtrlHandler failed\n");
+#ifndef DEBUG_VDSERVICE
         return;
+#endif // DEBUG_VDSERVICE
     }
 
     // service is starting
@@ -358,7 +367,9 @@ VOID WINAPI VDService::main(DWORD argc, TCHAR* argv[])
     // service is stopped
     status->dwControlsAccepted &= ~VDSERVICE_ACCEPTED_CONTROLS;
     status->dwCurrentState = SERVICE_STOPPED;
+#ifndef DEBUG_VDSERVICE
     SetServiceStatus(s->_status_handle, status);
+#endif //DEBUG_VDSERVICE
 }
 
 typedef __declspec (align(1)) struct VDAgentDataChunk {
