@@ -21,8 +21,14 @@
 #pragma warning(disable:4200)
 
 #include <windows.h>
-#include "vd_agent.h"
+#include "spice/vd_agent.h"
 #include "vdlog.h"
+
+typedef CRITICAL_SECTION mutex_t;
+
+#define MUTEX_INIT(mutex) InitializeCriticalSection(&mutex)
+#define MUTEX_LOCK(mutex) EnterCriticalSection(&mutex)
+#define MUTEX_UNLOCK(mutex) LeaveCriticalSection(&mutex)
 
 #define VD_SERVICE_PIPE_NAME   TEXT("\\\\.\\pipe\\vdservicepipe")
 #define VD_MESSAGE_HEADER_SIZE (sizeof(VDPipeMessage) + sizeof(VDAgentMessage))

@@ -23,7 +23,6 @@
 #include <tlhelp32.h>
 #include "vdcommon.h"
 #include "vdi_port.h"
-#include "mutex.h"
 
 #define VD_SERVICE_DISPLAY_NAME TEXT("RHEV Spice Agent")
 #define VD_SERVICE_NAME         TEXT("vdservice")

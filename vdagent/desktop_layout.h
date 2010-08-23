@@ -18,8 +18,8 @@
 #ifndef _H_DESKTOP_LAYOUT
 #define _H_DESKTOP_LAYOUT
 
-#include "mutex.h"
 #include <vector>
+#include "vdcommon.h"
 
 class DisplayMode {
 public:
