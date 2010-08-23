@@ -23,10 +23,6 @@
 
 #define BUF_SIZE    (1024 * 1024)
 
-#define BUF_READ    (1 << 0)
-#define BUF_WRITE   (1 << 1)
-#define BUF_ALL     (BUF_READ | BUF_WRITE)
-
 #define VDI_PORT_BLOCKED    0
 #define VDI_PORT_RESET      -1
 #define VDI_PORT_ERROR      -2
