@@ -34,7 +34,7 @@
 #define VD_AGENT_MAX_RESTARTS   10
 #define VD_AGENT_RESTART_INTERVAL 3000
 #define VD_AGENT_RESTART_COUNT_RESET_INTERVAL 60000
-#define VD_EVENTS_COUNT         4
+#define VD_EVENTS_COUNT         5
 #define WINLOGON_FILENAME       TEXT("winlogon.exe")
 #define CREATE_PROC_MAX_RETRIES 10
 #define CREATE_PROC_INTERVAL_MS 500
@@ -399,10 +399,11 @@ bool VDService::execute()
         return false;
     }
     vd_printf("Connected to server");
-    _events[0] = _vdi_port->get_event();
-    _events[1] = _pipe_state.read.overlap.hEvent;
-    _events[2] = _control_event;
-    _events[3] = _agent_proc_info.hProcess;
+    _events[0] = _pipe_state.read.overlap.hEvent;
+    _events[1] = _control_event;
+    _events[2] = _vdi_port->get_read_event();
+    _events[3] = _vdi_port->get_write_event();
+    _events[4] = _agent_proc_info.hProcess;
     _chunk_size = _chunk_port = 0;
     read_pipe();
     while (_running) {
@@ -428,9 +429,7 @@ bool VDService::execute()
             DWORD wait_ret = WaitForMultipleObjectsEx(events_count, _events, FALSE,
                                                       cont ? 0 : INFINITE, TRUE);
             switch (wait_ret) {
-            case WAIT_OBJECT_0:
-                break;
-            case WAIT_OBJECT_0 + 1: {
+            case WAIT_OBJECT_0 + 0: {
                 DWORD bytes = 0;
                 if (_pipe_connected && _pending_read) {
                     _pending_read = false;
@@ -446,10 +445,16 @@ bool VDService::execute()
                 }
                 break;
             }
-            case WAIT_OBJECT_0 + 2:
+            case WAIT_OBJECT_0 + 1:
                 vd_printf("Control event");
                 break;
+            case WAIT_OBJECT_0 + 2:
+                _vdi_port->read_completion();
+                break;
             case WAIT_OBJECT_0 + 3:
+                _vdi_port->write_completion();
+                break;
+            case WAIT_OBJECT_0 + 4:
                 vd_printf("Agent killed");
                 if (_system_version == SYS_VER_WIN_XP) {
                     restart_agent(false);

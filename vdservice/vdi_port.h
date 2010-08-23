@@ -31,30 +31,40 @@
 #define VDI_PORT_RESET      -1
 #define VDI_PORT_ERROR      -2
 
+typedef struct VDIPortBuffer {
+    OVERLAPPED overlap;
+    uint8_t* start;
+    uint8_t* end;
+    bool pending;
+    int bytes;
+    uint8_t ring[BUF_SIZE];
+} VDIPortBuffer;
+
 class VDIPort {
 public:
     VDIPort();
     ~VDIPort();
     bool init();
     size_t ring_write(const void* buf, size_t size);
+    size_t write_ring_free_space();
     size_t ring_read(void* buf, size_t size);
     size_t read_ring_size();
+    size_t read_ring_continuous_remaining_size();
+    HANDLE get_write_event() { return _write.overlap.hEvent; }
+    HANDLE get_read_event() { return _read.overlap.hEvent; }
     int write();
     int read();
-    HANDLE get_event() { return _event;}
+    void write_completion();
+    void read_completion();
 
 private:
     int handle_error();
 
 private:
+    static VDIPort* _singleton;
     HANDLE _handle;
-    HANDLE _event;
-    uint8_t _write_ring[BUF_SIZE];
-    uint8_t* _write_start;
-    uint8_t* _write_end;
-    uint8_t _read_ring[BUF_SIZE];
-    uint8_t* _read_start;
-    uint8_t* _read_end;
+    VDIPortBuffer _write;
+    VDIPortBuffer _read;
 };
 
 // Ring notes:
