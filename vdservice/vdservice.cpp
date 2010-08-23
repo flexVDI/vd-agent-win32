@@ -42,6 +42,7 @@
 
 enum {
     VD_EVENT_PIPE_READ = 0,
+    VD_EVENT_PIPE_WRITE,
     VD_EVENT_CONTROL,
     VD_EVENT_READ,
     VD_EVENT_WRITE,
@@ -64,7 +65,7 @@ private:
     static DWORD WINAPI control_handler(DWORD control, DWORD event_type,
                                         LPVOID event_data, LPVOID context);
     static VOID WINAPI main(DWORD argc, TCHAR * argv[]);
-    static VOID CALLBACK write_completion(DWORD err, DWORD bytes, LPOVERLAPPED overlap);
+    void pipe_write_completion();
     void write_agent_control(uint32_t type, uint32_t opaque);
     void read_pipe();
     void handle_pipe_data(DWORD bytes);
@@ -158,6 +159,7 @@ VDService::VDService()
     ZeroMemory(_events, sizeof(_events));
     _system_version = supported_system_version();
     _control_event = CreateEvent(NULL, FALSE, FALSE, NULL);
+    _pipe_state.write.overlap.hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
     _pipe_state.read.overlap.hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
     _agent_path[0] = wchar_t('\0');
     MUTEX_INIT(_agent_mutex);
@@ -167,6 +169,7 @@ VDService::VDService()
 VDService::~VDService()
 {
     CloseHandle(_pipe_state.read.overlap.hEvent);
+    CloseHandle(_pipe_state.write.overlap.hEvent);
     CloseHandle(_control_event);
     delete _log;
 }
@@ -419,6 +422,7 @@ bool VDService::execute()
     }
     vd_printf("Connected to server");
     _events[VD_EVENT_PIPE_READ] = _pipe_state.read.overlap.hEvent;
+    _events[VD_EVENT_PIPE_WRITE] = _pipe_state.write.overlap.hEvent;
     _events[VD_EVENT_CONTROL] = _control_event;
     _events[VD_EVENT_READ] = _vdi_port->get_read_event();
     _events[VD_EVENT_WRITE] = _vdi_port->get_write_event();
@@ -442,17 +446,20 @@ bool VDService::execute()
         if (cont) {
             handle_port_data();
         }
+        if (cont_write) {
+            handle_pipe_data(0);
+        }
         if (_running && (!cont || _pending_read || _pending_write)) {
             DWORD events_count = _events[VD_EVENT_AGENT] ? VD_EVENTS_COUNT : VD_EVENTS_COUNT - 1;
-            DWORD wait_ret = WaitForMultipleObjectsEx(events_count, _events, FALSE,
-                                                      cont ? 0 : INFINITE, TRUE);
+            DWORD wait_ret = WaitForMultipleObjects(events_count, _events, FALSE,
+                                                              cont ? 0 : INFINITE);
             switch (wait_ret) {
             case WAIT_OBJECT_0 + VD_EVENT_PIPE_READ: {
                 DWORD bytes = 0;
                 if (_pipe_connected && _pending_read) {
                     _pending_read = false;
-                    if (GetOverlappedResult(_pipe_state.pipe, &_pipe_state.read.overlap, &bytes,
-                                                                                           FALSE)) {
+                    if (GetOverlappedResult(_pipe_state.pipe, &_pipe_state.read.overlap,
+                                            &bytes, FALSE) || GetLastError() == ERROR_MORE_DATA) {
                         handle_pipe_data(bytes);
                         read_pipe();
                     } else {
@@ -463,6 +470,9 @@ bool VDService::execute()
                 }
                 break;
             }
+            case WAIT_OBJECT_0 + VD_EVENT_PIPE_WRITE:
+                pipe_write_completion();
+                break;
             case WAIT_OBJECT_0 + VD_EVENT_CONTROL:
                 vd_printf("Control event");
                 break;
@@ -480,11 +490,10 @@ bool VDService::execute()
                     kill_agent();
                 }
                 break;
-            case WAIT_IO_COMPLETION:
             case WAIT_TIMEOUT:
                 break;
             default:
-                vd_printf("WaitForMultipleObjectsEx failed %u", GetLastError());
+                vd_printf("WaitForMultipleObjects failed %u", GetLastError());
             }
         }
     }
@@ -862,31 +871,40 @@ void VDService::stop()
     }
 }
 
-VOID CALLBACK VDService::write_completion(DWORD err, DWORD bytes, LPOVERLAPPED overlap)
+void VDService::pipe_write_completion()
 {
-    VDService* s = _singleton;
-    VDPipeState* ps = &s->_pipe_state;
+    VDPipeState* ps = &this->_pipe_state;
+    DWORD bytes;
 
-    s->_pending_write = false;
-    if (!s->_running) {
+    if (!_running) {
         return;
     }
-    if (err) {
-        vd_printf("error %u", err);
-        return;
-    }
-    ps->write.start += bytes;
+    if (_pending_write) {
+        if (GetOverlappedResult(_pipe_state.pipe, &_pipe_state.write.overlap, &bytes, FALSE)) {
+            ps->write.start += bytes;
+            if (ps->write.start == ps->write.end) {
+                ps->write.start = ps->write.end = 0;
+            }
+        } else if (GetLastError() == ERROR_IO_PENDING){
+            vd_printf("Overlapped write is pending");
+            return;
+        } else {
+            vd_printf("GetOverlappedResult() failed : %d", GetLastError());
+        }
+	    _pending_write = false;
+	}
+
     if (ps->write.start < ps->write.end) {
-        s->_pending_write = true;
-        if (!WriteFileEx(ps->pipe, ps->write.data + ps->write.start,
-                         ps->write.end - ps->write.start, overlap, write_completion)) {
-            vd_printf("WriteFileEx() failed: %u", GetLastError());
-            s->_pending_write = false;
-            s->_pipe_connected = false;
-            DisconnectNamedPipe(s->_pipe_state.pipe);
+        _pending_write = true;
+        if (!WriteFile(ps->pipe, ps->write.data + ps->write.start,
+                       ps->write.end - ps->write.start, NULL, &_pipe_state.write.overlap)) {
+            vd_printf("WriteFile() failed: %u", GetLastError());
+            _pending_write = false;
+            _pipe_connected = false;
+            DisconnectNamedPipe(_pipe_state.pipe);
         }
     } else {
-        s->_pending_write = false;
+        _pending_write = false;
     }
 }
 
@@ -1006,7 +1024,7 @@ void VDService::handle_port_data()
         }
     }
     if (_pipe_connected && chunks_count && !_pending_write) {
-        write_completion(0, 0, &_pipe_state.write.overlap);
+        pipe_write_completion();
     }
 }
 
@@ -1044,7 +1062,7 @@ void VDService::write_agent_control(uint32_t type, uint32_t opaque)
     msg->opaque = opaque;
     _pipe_state.write.end += sizeof(VDPipeMessage);
     if (!_pending_write) {
-        write_completion(0, 0, &_pipe_state.write.overlap);
+        pipe_write_completion();
     }
 }
 
