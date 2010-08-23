@@ -437,8 +437,10 @@ bool VDService::execute()
         if (cont_read >= 0 && cont_write >= 0) {
             cont = cont_read || cont_write;
         } else if (cont_read == VDI_PORT_ERROR || cont_write == VDI_PORT_ERROR) {
+            vd_printf("VDI Port error, read %d write %d", cont_read, cont_write);
             _running = false;
         } else if (cont_read == VDI_PORT_RESET || cont_write == VDI_PORT_RESET) {
+            vd_printf("VDI Port reset, read %d write %d", cont_read, cont_write);
             _chunk_size = _chunk_port = 0;
             write_agent_control(VD_AGENT_RESET, ++_connection_id);
             _pending_reset = true;
@@ -865,6 +867,7 @@ bool VDService::restart_agent(bool normal_restart)
 
 void VDService::stop()
 {
+    vd_printf("Service stopped");
     _running = false;
     if (_control_event && !SetEvent(_control_event)) {
         vd_printf("SetEvent() failed: %u", GetLastError());
@@ -916,9 +919,9 @@ void VDService::read_pipe()
     if (ps->read.end < sizeof(ps->read.data)) {
         _pending_read = true;
         if (ReadFile(ps->pipe, ps->read.data + ps->read.end, sizeof(ps->read.data) - ps->read.end,
-                     &bytes, &ps->read.overlap)) {
+                     &bytes, &ps->read.overlap) || GetLastError() == ERROR_MORE_DATA) {
             _pending_read = false;
-            vd_printf("ReadFile without pending");
+            vd_printf("ReadFile without pending %u", bytes);
             handle_pipe_data(bytes);
             read_pipe();
         } else if (GetLastError() != ERROR_IO_PENDING) {
@@ -932,12 +935,15 @@ void VDService::read_pipe()
     }
 }
 
+//FIXME: division to max size chunks should be here, not in the agent
 void VDService::handle_pipe_data(DWORD bytes)
 {
     VDPipeState* ps = &_pipe_state;
     DWORD read_size;
 
-    _pending_read = false;
+    if (bytes) {
+        _pending_read = false;
+    }
     if (!_running) {
         return;
     }
@@ -949,28 +955,31 @@ void VDService::handle_pipe_data(DWORD bytes)
             ps->read.start += sizeof(VDPipeMessage);
             continue;
         }
-        if (read_size < VD_MESSAGE_HEADER_SIZE) {
+        if (read_size < sizeof(VDPipeMessage) + pipe_msg->size) {
             break;
         }
-        VDAgentMessage* msg = (VDAgentMessage*)pipe_msg->data;
-        DWORD chunk_size = sizeof(VDAgentMessage) + msg->size;
-        VDAgentDataChunk chunk;
-        if (read_size < VD_MESSAGE_HEADER_SIZE + msg->size) {
+        if (_vdi_port->write_ring_free_space() < sizeof(VDAgentDataChunk) + pipe_msg->size) {
+            //vd_printf("DEBUG: no space in write ring %u", _vdi_port->write_ring_free_space());
             break;
         }
         if (!_pending_reset) {
+            VDAgentDataChunk chunk;
             chunk.port = pipe_msg->opaque;
-            chunk.size = chunk_size;
+            chunk.size = pipe_msg->size;
             if (_vdi_port->ring_write(&chunk, sizeof(chunk)) != sizeof(chunk) ||
-                            _vdi_port->ring_write(msg, chunk_size) != chunk_size) {
+                    _vdi_port->ring_write(pipe_msg->data, chunk.size) != chunk.size) {
                 vd_printf("ring_write failed");
                 _running = false;
                 return;
             }
         }
-        ps->read.start += (VD_MESSAGE_HEADER_SIZE + msg->size);
-        if (ps->read.start == ps->read.end) {
-            ps->read.start = ps->read.end = 0;
+        ps->read.start += (sizeof(VDPipeMessage) + pipe_msg->size);
+    }
+    if (ps->read.start == ps->read.end && !_pending_read) {
+        DWORD prev_read_end = ps->read.end;
+        ps->read.start = ps->read.end = 0;
+        if (prev_read_end == sizeof(ps->read.data)) {
+            read_pipe();
         }
     }
 }
@@ -980,7 +989,7 @@ void VDService::handle_port_data()
     VDPipeMessage* pipe_msg;
     VDAgentDataChunk chunk;
     int chunks_count = 0;
-    DWORD count;
+    DWORD count = 0;
 
     while (_running) {
         if (!_chunk_size && _vdi_port->read_ring_size() >= sizeof(chunk)) {
@@ -990,9 +999,6 @@ void VDService::handle_port_data()
                 break;
             }
             count = sizeof(VDPipeMessage) + chunk.size;
-            if (_pipe_state.write.start == _pipe_state.write.end) {
-                _pipe_state.write.start = _pipe_state.write.end = 0;
-            }
             if (_pipe_state.write.end + count > sizeof(_pipe_state.write.data)) {
                 vd_printf("chunk is too large, size %u port %u", chunk.size, chunk.port);
                 _running = false;
@@ -1002,6 +1008,7 @@ void VDService::handle_port_data()
             _chunk_port = chunk.port;
         }
         if (_chunk_size && _vdi_port->read_ring_size() >= _chunk_size) {
+            count = sizeof(VDPipeMessage) + _chunk_size;
             ASSERT(_pipe_state.write.end + count <= sizeof(_pipe_state.write.data));
             pipe_msg = (VDPipeMessage*)&_pipe_state.write.data[_pipe_state.write.end];
             if (_vdi_port->ring_read(pipe_msg->data, _chunk_size) != _chunk_size) {
@@ -1012,6 +1019,7 @@ void VDService::handle_port_data()
             if (_pipe_connected) {
                 pipe_msg->type = VD_AGENT_COMMAND;
                 pipe_msg->opaque = _chunk_port;
+                pipe_msg->size = _chunk_size;
                 _pipe_state.write.end += count;
                 chunks_count++;
             } else {

@@ -42,6 +42,7 @@ private:
     static VOID CALLBACK read_completion(DWORD err, DWORD bytes, LPOVERLAPPED overlap);
     static VOID CALLBACK write_completion(DWORD err, DWORD bytes, LPOVERLAPPED overlap);
     static DWORD WINAPI event_thread_proc(LPVOID param);
+    static void dispatch_message(VDAgentMessage* msg, uint32_t port);
     uint8_t* write_lock(DWORD bytes = 0);
     void write_unlock(DWORD bytes = 0);
     bool connect_pipe();
@@ -56,6 +57,8 @@ private:
     INPUT _input;
     DWORD _input_time;
     HANDLE _desktop_switch_event;
+    VDAgentMessage* _in_msg;
+    uint32_t _in_msg_pos;
     bool _pending_input;
     bool _pending_write;
     bool _running;
@@ -81,6 +84,8 @@ VDAgent::VDAgent()
     , _mouse_x (0)
     , _mouse_y (0)
     , _input_time (0)
+    , _in_msg (NULL)
+    , _in_msg_pos (0)
     , _pending_input (false)
     , _pending_write (false)
     , _running (false)
@@ -386,6 +391,7 @@ bool VDAgent::handle_mon_config(VDAgentMonitorsConfig* mon_config, uint32_t port
     }
     reply_pipe_msg->type = VD_AGENT_COMMAND;
     reply_pipe_msg->opaque = port;
+    reply_pipe_msg->size = sizeof(VDAgentMessage) + sizeof(VDAgentReply);
     reply_msg = (VDAgentMessage*)reply_pipe_msg->data;
     reply_msg->protocol = VD_AGENT_PROTOCOL;
     reply_msg->type = VD_AGENT_REPLY;
@@ -456,6 +462,27 @@ bool VDAgent::connect_pipe()
     vd_printf("Connected to service pipe");
     return true;
 }
+void VDAgent::dispatch_message(VDAgentMessage* msg, uint32_t port)
+{
+    VDAgent* a = _singleton;
+
+    switch (msg->type) {
+    case VD_AGENT_MOUSE_STATE:
+        if (!a->handle_mouse_event((VDAgentMouseState*)msg->data)) {
+            vd_printf("handle_mouse_event failed: %u", GetLastError());
+            a->_running = false;
+        }
+        break;
+    case VD_AGENT_MONITORS_CONFIG:
+        if (!a->handle_mon_config((VDAgentMonitorsConfig*)msg->data, port)) {
+            vd_printf("handle_mon_config failed: %u", GetLastError());
+            a->_running = false;
+        }
+        break;
+    default:
+        vd_printf("Unsupported message type %u size %u", msg->type, msg->size);
+    }
+}
 
 VOID CALLBACK VDAgent::read_completion(DWORD err, DWORD bytes, LPOVERLAPPED overlap)
 {
@@ -480,35 +507,43 @@ VOID CALLBACK VDAgent::read_completion(DWORD err, DWORD bytes, LPOVERLAPPED over
             ps->read.start += sizeof(VDPipeMessage);
             continue;
         }
-        if (len < VD_MESSAGE_HEADER_SIZE) {
+        if (len < sizeof(VDPipeMessage) + pipe_msg->size) {
             break;
         }
-        VDAgentMessage* msg = (VDAgentMessage*)pipe_msg->data;
-        if (len < VD_MESSAGE_HEADER_SIZE + msg->size) {
-            break;
-        }
-        if (msg->protocol != VD_AGENT_PROTOCOL) {
-            vd_printf("Invalid protocol %d", msg->protocol);
-            a->_running = false;
-            break;
-        }
-        switch (msg->type) {
-        case VD_AGENT_MOUSE_STATE:
-            if (!a->handle_mouse_event((VDAgentMouseState*)msg->data)) {
-                vd_printf("handle_mouse_event failed: %d", GetLastError());
-                a->_running = false;
+
+        //FIXME: cleanup, specific to one port
+        if (a->_in_msg_pos == 0 || pipe_msg->opaque == 2 /*FIXME!*/) {
+            if (len < VD_MESSAGE_HEADER_SIZE) {
+                break;
             }
-            break;
-        case VD_AGENT_MONITORS_CONFIG:
-            if (!a->handle_mon_config((VDAgentMonitorsConfig*)msg->data, pipe_msg->opaque)) {
-                vd_printf("handle_mon_config failed: %d", GetLastError());
+            VDAgentMessage* msg = (VDAgentMessage*)pipe_msg->data;
+            if (msg->protocol != VD_AGENT_PROTOCOL) {
+                vd_printf("Invalid protocol %u bytes %u", msg->protocol, bytes);
                 a->_running = false;
+                break;
             }
-            break;
-        default:
-            vd_printf("Unsupported message type %d size %d", msg->type, msg->size);
+            uint32_t msg_size = sizeof(VDAgentMessage) + msg->size;
+            if (pipe_msg->size == msg_size) {
+                dispatch_message(msg, pipe_msg->opaque);
+            } else {
+                ASSERT(pipe_msg->size < msg_size);
+                a->_in_msg = (VDAgentMessage*)new uint8_t[msg_size];
+                memcpy(a->_in_msg, pipe_msg->data, pipe_msg->size);
+                a->_in_msg_pos = pipe_msg->size;
+            }
+        } else {
+            memcpy((uint8_t*)a->_in_msg + a->_in_msg_pos, pipe_msg->data, pipe_msg->size);
+            a->_in_msg_pos += pipe_msg->size;
+            //vd_printf("DEBUG: pipe_msg size %u pos %u total %u", pipe_msg->size, a->_in_msg_pos, sizeof(VDAgentMessage) + a->_in_msg->size);
+            if (a->_in_msg_pos == sizeof(VDAgentMessage) + a->_in_msg->size) {
+                dispatch_message(a->_in_msg, 0);
+                a->_in_msg_pos = 0;
+                delete[] (uint8_t *)a->_in_msg;
+                a->_in_msg = NULL;
+            }
         }
-        ps->read.start += (VD_MESSAGE_HEADER_SIZE + msg->size);
+
+        ps->read.start += (sizeof(VDPipeMessage) + pipe_msg->size);
         if (ps->read.start == ps->read.end) {
             ps->read.start = ps->read.end = 0;
         }
@@ -554,10 +589,11 @@ VOID CALLBACK VDAgent::write_completion(DWORD err, DWORD bytes, LPOVERLAPPED ove
 
 uint8_t* VDAgent::write_lock(DWORD bytes)
 {
+    MUTEX_LOCK(_write_mutex);
     if (_pipe_state.write.end + bytes <= sizeof(_pipe_state.write.data)) {
-        MUTEX_LOCK(_write_mutex);
         return &_pipe_state.write.data[_pipe_state.write.end];
     } else {
+        MUTEX_UNLOCK(_write_mutex);
         vd_printf("write buffer is full");
         return NULL;
     }

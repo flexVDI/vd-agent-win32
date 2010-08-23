@@ -44,6 +44,7 @@ enum {
 typedef __declspec (align(1)) struct VDPipeMessage {
     uint32_t type;
     uint32_t opaque;
+    uint32_t size;
     uint8_t data[0];
 } VDPipeMessage;
 
