@@ -140,6 +140,27 @@ int supported_system_version()
     return 0;
 }
 
+bool has_qxl_device()
+{
+    DISPLAY_DEVICE dev_info;
+    bool ret = false;
+    DWORD dev_id = 0;
+    DWORD qxl_id;
+
+    ZeroMemory(&dev_info, sizeof(dev_info));
+    dev_info.cb = sizeof(dev_info);
+    while (EnumDisplayDevices(NULL, dev_id, &dev_info, 0)) {
+        if (wcsstr(dev_info.DeviceString, L"QXL") != NULL
+            && get_qxl_device_id(dev_info.DeviceKey, &qxl_id)) {
+            vd_printf("found QXL device at id %d, qxl_id %d", dev_id, qxl_id);
+            ret = true;
+            break;
+        }
+        dev_id++;
+    }
+    return ret;
+}
+
 VDService::VDService()
     : _status_handle (0)
     , _vdi_port (NULL)
@@ -338,8 +359,10 @@ VOID WINAPI VDService::main(DWORD argc, TCHAR* argv[])
         swprintf_s(log_path, MAX_PATH, VD_SERVICE_LOG_PATH, temp_path);
         s->_log = VDLog::get(log_path);
     }
+
     vd_printf("***Service started***");
     log_version();
+
     if (!SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS)) {
         vd_printf("SetPriorityClass failed %u", GetLastError());
     }
@@ -369,8 +392,12 @@ VOID WINAPI VDService::main(DWORD argc, TCHAR* argv[])
     status->dwCurrentState = SERVICE_RUNNING;
     SetServiceStatus(s->_status_handle, status);
 
-    s->_running = true;
-    s->execute();
+    if (has_qxl_device()) {
+        s->_running = true;
+        s->execute();
+    } else {
+        vd_printf("didn't find any qxl devices\n");
+    }
 
     // service was stopped
     status->dwCurrentState = SERVICE_STOP_PENDING;

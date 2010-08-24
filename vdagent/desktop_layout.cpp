@@ -17,6 +17,7 @@
 
 #include "desktop_layout.h"
 #include "vdlog.h"
+#include "vdcommon.h"
 
 void DisplayMode::set_res(DWORD width, DWORD height, DWORD depth)
 {
@@ -153,24 +154,6 @@ bool DesktopLayout::is_attached(LPCTSTR dev_name)
     dev_mode.dmSize = sizeof(dev_mode);
     EnumDisplaySettings(dev_name, ENUM_CURRENT_SETTINGS, &dev_mode);
     return !!dev_mode.dmBitsPerPel;
-}
-
-bool DesktopLayout::get_qxl_device_id(WCHAR* device_key, DWORD* device_id)
-{
-    DWORD type = REG_BINARY;
-    DWORD size = sizeof(*device_id);
-    bool key_found = false;
-    HKEY key;
-
-    if (RegOpenKeyEx(HKEY_LOCAL_MACHINE, wcsstr(device_key, L"System"),
-                     0L, KEY_QUERY_VALUE, &key) == ERROR_SUCCESS) {
-        if (RegQueryValueEx(key, L"QxlDeviceID", NULL, &type, (LPBYTE)device_id, &size) ==
-                                                                             ERROR_SUCCESS) {
-            key_found = true;
-        }
-        RegCloseKey(key);
-    }
-    return key_found;
 }
 
 void DesktopLayout::init_dev_mode(DEVMODE* dev_mode, DisplayMode* mode, bool set_pos)
