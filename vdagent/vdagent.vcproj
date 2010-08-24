@@ -498,6 +498,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\display_setting.cpp"
+				>
+			</File>
+			<File
 				RelativePath=".\vdagent.cpp"
 				>
 			</File>
@@ -513,6 +517,10 @@
 			>
 			<File
 				RelativePath=".\desktop_layout.h"
+				>
+			</File>
+			<File
+				RelativePath=".\display_setting.h"
 				>
 			</File>
 			<File
