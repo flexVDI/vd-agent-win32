@@ -37,6 +37,8 @@ private:
     VDAgent();
     void input_desktop_message_loop();
     bool handle_mouse_event(VDAgentMouseState* state);
+    bool handle_announce_capabilities(
+        VDAgentAnnounceCapabilities* announce_capabilities, uint32_t msg_size);
     bool handle_mon_config(VDAgentMonitorsConfig* mon_config, uint32_t port);
     bool handle_clipboard(VDAgentClipboard* clipboard, uint32_t size);
     bool handle_display_config(VDAgentDisplayConfig* display_config, uint32_t port);
@@ -56,6 +58,7 @@ private:
     bool send_input();
     void set_display_depth(uint32_t depth);
     void load_display_setting();
+    bool send_announce_capabilities(bool request);
 
 private:
     static VDAgent* _singleton;
@@ -84,6 +87,9 @@ private:
     bool _logon_desktop;
     bool _display_setting_initialized;
     bool _logon_occured;
+
+    uint32_t *_client_caps;
+    uint32_t _client_caps_size;
 
     VDLog* _log;
 };
@@ -119,6 +125,8 @@ VDAgent::VDAgent()
     , _logon_desktop (false)
     , _display_setting_initialized (false)
     , _log (NULL)
+    , _client_caps(NULL)
+    , _client_caps_size(NULL)
 {
     TCHAR log_path[MAX_PATH];
     TCHAR temp_path[MAX_PATH];
@@ -136,6 +144,7 @@ VDAgent::VDAgent()
 VDAgent::~VDAgent()
 {
     delete _log;
+    delete[] _client_caps;
 }
 
 DWORD WINAPI VDAgent::event_thread_proc(LPVOID param)
@@ -210,6 +219,7 @@ bool VDAgent::run()
         delete _desktop_layout;
         return false;
     }
+    send_announce_capabilities(true);
     read_completion(0, 0, &_pipe_state.read.overlap);
     while (_running) {
         input_desktop_message_loop();
@@ -522,6 +532,77 @@ void VDAgent::load_display_setting()
     _display_setting.load();
 }
 
+bool VDAgent::send_announce_capabilities(bool request)
+{
+    DWORD msg_size;
+    VDPipeMessage* caps_pipe_msg;
+    VDAgentMessage* caps_msg;
+    VDAgentAnnounceCapabilities* caps;
+    uint32_t caps_size;
+    uint32_t internal_msg_size = sizeof(VDAgentAnnounceCapabilities) + VD_AGENT_CAPS_BYTES;
+
+    msg_size = VD_MESSAGE_HEADER_SIZE + internal_msg_size;
+    caps_pipe_msg = (VDPipeMessage*)write_lock(msg_size);
+    if (!caps_pipe_msg) {
+        return false;
+    }
+
+    caps_size = VD_AGENT_CAPS_SIZE;
+    caps_pipe_msg->type = VD_AGENT_COMMAND;
+    caps_pipe_msg->opaque = VDP_CLIENT_PORT;
+    caps_pipe_msg->size = sizeof(VDAgentMessage) + internal_msg_size;
+    caps_msg = (VDAgentMessage*)caps_pipe_msg->data;
+    caps_msg->protocol = VD_AGENT_PROTOCOL;
+    caps_msg->type = VD_AGENT_ANNOUNCE_CAPABILITIES;
+    caps_msg->opaque = 0;
+    caps_msg->size = internal_msg_size;
+    caps = (VDAgentAnnounceCapabilities*)caps_msg->data;
+    caps->request = request;
+    memset(caps->caps, 0, VD_AGENT_CAPS_BYTES);
+    VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_MOUSE_STATE);
+    VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_MONITORS_CONFIG);
+    VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_REPLY);
+#ifdef CLIPBOARD_ENABLED
+    VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_CLIPBOARD);
+#endif
+    VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_DISPLAY_CONFIG);
+    vd_printf("sending capabilities:");
+    for (uint32_t i = 0 ; i < caps_size; ++i) {
+        vd_printf("%X", caps->caps[i]);
+    }
+    write_unlock(msg_size);
+    if (!_pending_write) {
+        write_completion(0, 0, &_pipe_state.write.overlap);
+    }
+    return true;
+}
+
+bool VDAgent::handle_announce_capabilities(
+    VDAgentAnnounceCapabilities* announce_capabilities, uint32_t msg_size)
+{
+    uint32_t caps_size = VD_AGENT_CAPS_SIZE_FROM_MSG_SIZE(msg_size);
+
+    vd_printf("got capabilities (%d)", caps_size);
+    for (uint32_t i = 0 ; i < caps_size; ++i) {
+        vd_printf("%X", announce_capabilities->caps[i]);
+    }
+
+    if (caps_size != _client_caps_size) {
+        delete[] _client_caps;
+        _client_caps = new uint32_t[caps_size];
+        ASSERT(_client_caps != NULL);
+        _client_caps_size = caps_size;
+    }
+    memcpy(_client_caps, announce_capabilities->caps,
+                         sizeof(_client_caps[0]) * caps_size);
+
+    if (announce_capabilities->request) {
+        return send_announce_capabilities(false);
+    }
+
+    return true;
+}
+
 bool VDAgent::handle_display_config(VDAgentDisplayConfig* display_config, uint32_t port)
 {
     DisplaySettingOptions disp_setting_opts;
@@ -740,7 +821,14 @@ void VDAgent::dispatch_message(VDAgentMessage* msg, uint32_t port)
         if (!a->handle_display_config((VDAgentDisplayConfig*)msg->data, port)) {
             vd_printf("handle_display_config failed");
             a->_running = false;
-        }        
+        }
+        break;
+    case VD_AGENT_ANNOUNCE_CAPABILITIES:
+        if (!a->handle_announce_capabilities((VDAgentAnnounceCapabilities*)msg->data,
+                msg->size)) {
+            vd_printf("handle_announce_capabilities failed");
+            a->_running = false;
+        }
         break;
     default:
         vd_printf("Unsupported message type %u size %u", msg->type, msg->size);
