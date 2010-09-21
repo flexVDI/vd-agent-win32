@@ -20,12 +20,21 @@
 #include "display_setting.h"
 #include <lmcons.h>
 
-//#define CLIPBOARD_ENABLED
-
 #define VD_AGENT_LOG_PATH       TEXT("%svdagent.log")
 #define VD_AGENT_WINCLASS_NAME  TEXT("VDAGENT")
 #define VD_INPUT_INTERVAL_MS    20
 #define VD_TIMER_ID             1
+#define VD_CLIPBOARD_TIMEOUT_MS 10000
+
+typedef struct VDClipboardFormat {
+    uint32_t format;
+    uint32_t type;
+} VDClipboardFormat;
+
+VDClipboardFormat supported_clipboard_formats[] = {
+    {CF_UNICODETEXT, VD_AGENT_CLIPBOARD_UTF8_TEXT},
+    {CF_DIB, VD_AGENT_CLIPBOARD_BITMAP},
+    {0, 0}};
 
 class VDAgent {
 public:
@@ -37,13 +46,17 @@ private:
     VDAgent();
     void input_desktop_message_loop();
     bool handle_mouse_event(VDAgentMouseState* state);
-    bool handle_announce_capabilities(
-        VDAgentAnnounceCapabilities* announce_capabilities, uint32_t msg_size);
+    bool handle_announce_capabilities(VDAgentAnnounceCapabilities* announce_capabilities,
+                                      uint32_t msg_size);
     bool handle_mon_config(VDAgentMonitorsConfig* mon_config, uint32_t port);
     bool handle_clipboard(VDAgentClipboard* clipboard, uint32_t size);
+    bool handle_clipboard_grab(VDAgentClipboardGrab* clipboard_grab);
+    bool handle_clipboard_request(VDAgentClipboardRequest* clipboard_request);
+    bool handle_clipboard_release();
     bool handle_display_config(VDAgentDisplayConfig* display_config, uint32_t port);
     bool handle_control(VDPipeMessage* msg);
     bool on_clipboard_change();
+    bool on_clipboard_render(UINT format);
     DWORD get_buttons_change(DWORD last_buttons_state, DWORD new_buttons_state,
                              DWORD mask, DWORD down_flag, DWORD up_flag);
     static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
@@ -51,14 +64,18 @@ private:
     static VOID CALLBACK write_completion(DWORD err, DWORD bytes, LPOVERLAPPED overlap);
     static DWORD WINAPI event_thread_proc(LPVOID param);
     static void dispatch_message(VDAgentMessage* msg, uint32_t port);
+    static uint32_t get_clipboard_format(uint32_t type);
+    static uint32_t get_clipboard_type(uint32_t format);
     uint8_t* write_lock(DWORD bytes = 0);
     void write_unlock(DWORD bytes = 0);
+    bool write_message(uint32_t type, uint32_t size, void* data);
     bool write_clipboard();
     bool connect_pipe();
     bool send_input();
     void set_display_depth(uint32_t depth);
     void load_display_setting();
     bool send_announce_capabilities(bool request);
+    void cleanup();
 
 private:
     static VDAgent* _singleton;
@@ -71,6 +88,7 @@ private:
     INPUT _input;
     DWORD _input_time;
     HANDLE _desktop_switch_event;
+    HANDLE _clipboard_event;
     VDAgentMessage* _in_msg;
     uint32_t _in_msg_pos;
     VDAgentMessage* _out_msg;
@@ -107,11 +125,13 @@ VDAgent* VDAgent::get()
 VDAgent::VDAgent()
     : _hwnd (NULL)
     , _hwnd_next_viewer (NULL)
-    , _clipboard_changer (false)
+    , _clipboard_changer (true)
     , _buttons_state (0)
     , _mouse_x (0)
     , _mouse_y (0)
     , _input_time (0)
+    , _desktop_switch_event (NULL)
+    , _clipboard_event (NULL)
     , _in_msg (NULL)
     , _in_msg_pos (0)
     , _out_msg (NULL)
@@ -189,8 +209,10 @@ bool VDAgent::run()
         vd_printf("SetProcessShutdownParameters failed %u", GetLastError());
     }
     _desktop_switch_event = CreateEvent(NULL, FALSE, FALSE, NULL);
-    if (!_desktop_switch_event) {
+    _clipboard_event = CreateEvent(NULL, FALSE, FALSE, NULL);
+    if (!_desktop_switch_event || !_clipboard_event) {
         vd_printf("CreateEvent() failed: %d", GetLastError());
+        cleanup();
         return false;
     }
     memset(&wcls, 0, sizeof(wcls));
@@ -198,6 +220,7 @@ bool VDAgent::run()
     wcls.lpszClassName = VD_AGENT_WINCLASS_NAME;
     if (!RegisterClass(&wcls)) {
         vd_printf("RegisterClass() failed: %d", GetLastError());
+        cleanup();
         return false;
     }
     _desktop_layout = new DesktopLayout();
@@ -205,8 +228,7 @@ bool VDAgent::run()
         vd_printf("No QXL devices!");
     }
     if (!connect_pipe()) {
-        CloseHandle(_desktop_switch_event);
-        delete _desktop_layout;
+        cleanup();
         return false;
     }
     _running = true;
@@ -214,9 +236,7 @@ bool VDAgent::run()
         &event_thread_id);
     if (!event_thread) {
         vd_printf("CreateThread() failed: %d", GetLastError());
-        CloseHandle(_desktop_switch_event);
-        CloseHandle(_pipe_state.pipe);
-        delete _desktop_layout;
+        cleanup();
         return false;
     }
     send_announce_capabilities(true);
@@ -226,10 +246,16 @@ bool VDAgent::run()
     }
     vd_printf("Agent stopped");
     CloseHandle(event_thread);
+    cleanup();
+    return true;
+}
+
+void VDAgent::cleanup()
+{
     CloseHandle(_desktop_switch_event);
+    CloseHandle(_clipboard_event);
     CloseHandle(_pipe_state.pipe);
     delete _desktop_layout;
-    return true;
 }
 
 void VDAgent::input_desktop_message_loop()
@@ -466,44 +492,66 @@ bool VDAgent::handle_mon_config(VDAgentMonitorsConfig* mon_config, uint32_t port
     return true;
 }
 
-//FIXME: currently supports text only
 bool VDAgent::handle_clipboard(VDAgentClipboard* clipboard, uint32_t size)
 {
     HGLOBAL clip_data;
     LPVOID clip_buf;
     int clip_size;
+    int clip_len;
     UINT format;
-    bool ret;
+    bool ret = false;
 
-    switch (clipboard->type) {
-    case VD_AGENT_CLIPBOARD_UTF8_TEXT:
-        format = CF_UNICODETEXT;
+    // Get the required clipboard size
+    switch (format = get_clipboard_format(clipboard->type)) {
+    case CF_UNICODETEXT:
+        // Received utf8 string is not null-terminated   
+        if (!(clip_len = MultiByteToWideChar(CP_UTF8, 0, (LPCSTR)clipboard->data, size, NULL, 0))) {
+            return false;
+        }
+        clip_len++;
+        clip_size = clip_len * sizeof(WCHAR);
+        break;
+    case CF_DIB:
+        clip_size = size;
         break;
     default:
         vd_printf("Unsupported clipboard type %u", clipboard->type);
         return false;
     }
-    if (!OpenClipboard(_hwnd)) {
-        return false;
-    }
-    clip_size = MultiByteToWideChar(CP_UTF8, 0, (LPCSTR)clipboard->data, -1, NULL, 0);
-    if (!clip_size || !(clip_data = GlobalAlloc(GMEM_DDESHARE, clip_size * sizeof(WCHAR)))) {
-        CloseClipboard();
+    // Allocate and lock clipboard memory
+    if (!(clip_data = GlobalAlloc(GMEM_DDESHARE, clip_size))) {
         return false;
     }
     if (!(clip_buf = GlobalLock(clip_data))) {
         GlobalFree(clip_data);
-        CloseClipboard();
         return false;
     }
-    ret = !!MultiByteToWideChar(CP_UTF8, 0, (LPCSTR)clipboard->data, -1, (LPWSTR)clip_buf, clip_size);
-    GlobalUnlock(clip_data);
-    if (ret) {
-        EmptyClipboard();
-        //FIXME: nicify (compare clip_data)
-        _clipboard_changer = true;
-        ret = !!SetClipboardData(format, clip_data);
+    // Translate data and set clipboard content
+    switch (format) {
+    case CF_UNICODETEXT:
+        ret = !!MultiByteToWideChar(CP_UTF8, 0, (LPCSTR)clipboard->data, size, (LPWSTR)clip_buf,
+                                    clip_len);
+        ((LPWSTR)clip_buf)[clip_len - 1] = L'\0';
+        break;
+    case CF_DIB:
+        memcpy(clip_buf, clipboard->data, size);
+        ret = true;
+        break;
     }
+    GlobalUnlock(clip_data);
+    if (!ret) {
+        return false;
+    }
+    if (SetClipboardData(format, clip_data)) {
+        SetEvent(_clipboard_event);
+        return true;
+    }
+    // We retry clipboard open-empty-set-close only when there is a timeout in on_clipboard_render()
+    if (!OpenClipboard(_hwnd)) {
+        return false;
+    }
+    EmptyClipboard();
+    ret = !!SetClipboardData(format, clip_data);
     CloseClipboard();
     return ret;
 }
@@ -525,7 +573,6 @@ void VDAgent::set_display_depth(uint32_t depth)
         _desktop_layout->set_displays();
     }
 }
-
 
 void VDAgent::load_display_setting()
 {
@@ -562,9 +609,7 @@ bool VDAgent::send_announce_capabilities(bool request)
     VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_MOUSE_STATE);
     VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_MONITORS_CONFIG);
     VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_REPLY);
-#ifdef CLIPBOARD_ENABLED
     VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_CLIPBOARD);
-#endif
     VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_DISPLAY_CONFIG);
     vd_printf("sending capabilities:");
     for (uint32_t i = 0 ; i < caps_size; ++i) {
@@ -694,7 +739,6 @@ bool VDAgent::handle_control(VDPipeMessage* msg)
 
 #define MIN(a, b) ((a) > (b) ? (b) : (a))
 
-//FIXME: cleanup
 //FIXME: division to max size chunks should NOT be here, but in the service
 //       here we should write the max possible size to the pipe
 bool VDAgent::write_clipboard()
@@ -706,8 +750,7 @@ bool VDAgent::write_clipboard()
         return false;
     }
     pipe_msg->type = VD_AGENT_COMMAND;
-    //FIXME: client port should be in vd_agent.h
-    pipe_msg->opaque = 1;
+    pipe_msg->opaque = VDP_CLIENT_PORT;
     pipe_msg->size = n - sizeof(VDPipeMessage);
     memcpy(pipe_msg->data, (char*)_out_msg + _out_msg_pos, n - sizeof(VDPipeMessage));
     write_unlock(n);
@@ -724,14 +767,102 @@ bool VDAgent::write_clipboard()
     return true;
 }
 
-//FIXME: currently supports text only
+bool VDAgent::write_message(uint32_t type, uint32_t size = 0, void* data = NULL)
+{
+    VDPipeMessage* pipe_msg;
+    VDAgentMessage* msg;
+
+    pipe_msg = (VDPipeMessage*)write_lock(VD_MESSAGE_HEADER_SIZE + size);
+    if (!pipe_msg) {
+        return false;
+    }
+    pipe_msg->type = VD_AGENT_COMMAND;
+    pipe_msg->opaque = VDP_CLIENT_PORT;
+    pipe_msg->size = sizeof(VDAgentMessage) + size;
+    msg = (VDAgentMessage*)pipe_msg->data;
+    msg->protocol = VD_AGENT_PROTOCOL;
+    msg->type = type;
+    msg->opaque = 0;
+    msg->size = size;
+    if (size && data) {
+        memcpy(msg->data, data, size);
+    }
+    write_unlock(VD_MESSAGE_HEADER_SIZE + size);
+    if (!_pending_write) {
+        write_completion(0, 0, &_pipe_state.write.overlap);
+    }
+    return true;
+}
+
 bool VDAgent::on_clipboard_change()
 {
-    UINT format = CF_UNICODETEXT;
+    uint32_t type = 0;
+
+    for (VDClipboardFormat* iter = supported_clipboard_formats; iter->format && !type; iter++) {
+        if (IsClipboardFormatAvailable(iter->format)) {
+            type = iter->type;
+        }
+    }
+    if (!type) {
+        vd_printf("Unsupported clipboard format");
+        return false;
+    }
+    VDAgentClipboardGrab grab = {type};
+    return write_message(VD_AGENT_CLIPBOARD_GRAB, sizeof(grab), &grab);  
+}
+
+// In delayed rendering, Windows requires us to SetClipboardData before we return from
+// handling WM_RENDERFORMAT. Therefore, we try our best by sending CLIPBOARD_REQUEST to the
+// agent, while waiting alertably for a while (hoping for good) for receiving CLIPBOARD data
+// or CLIPBOARD_RELEASE from the agent, which both will signal clipboard_event.
+bool VDAgent::on_clipboard_render(UINT format)
+{
+    uint32_t type = get_clipboard_type(format);
+
+    if (!type) {
+        vd_printf("Unsupported clipboard format %u", format);
+        return false;
+    }
+    VDAgentClipboardRequest request = {type};
+    if (!write_message(VD_AGENT_CLIPBOARD_REQUEST, sizeof(request), &request)) {
+        return false;
+    }
+    DWORD start_tick = GetTickCount();
+    while (WaitForSingleObjectEx(_clipboard_event, 1000, TRUE) != WAIT_OBJECT_0 &&
+           GetTickCount() < start_tick + VD_CLIPBOARD_TIMEOUT_MS);
+    return true;
+}
+
+bool VDAgent::handle_clipboard_grab(VDAgentClipboardGrab* clipboard_grab)
+{
+    uint32_t format = get_clipboard_format(clipboard_grab->type);
+
+    if (!format) {
+        vd_printf("Unsupported clipboard type %u", clipboard_grab->type);
+        return false;
+    }
+    if (!OpenClipboard(_hwnd)) {
+        return false;
+    }
+    _clipboard_changer = true;
+    EmptyClipboard();
+    SetClipboardData(format, NULL);
+    CloseClipboard();
+    return true;
+}
+
+bool VDAgent::handle_clipboard_request(VDAgentClipboardRequest* clipboard_request)
+{
+    UINT format;
     HANDLE clip_data;
     LPVOID clip_buf;
     int clip_size;
+    size_t len;
 
+    if (!(format = get_clipboard_format(clipboard_request->type))) {
+        vd_printf("Unsupported clipboard type %u", clipboard_request->type);
+        return false;
+    }
     if (_out_msg) {
         vd_printf("clipboard change is already pending");
         return false;
@@ -743,7 +874,16 @@ bool VDAgent::on_clipboard_change()
         CloseClipboard();
         return false;
     }
-    clip_size = WideCharToMultiByte(CP_UTF8, 0, (LPCWSTR)clip_buf, -1, NULL, 0, NULL, NULL);
+    switch (format) {
+    case CF_UNICODETEXT:
+        len = wcslen((wchar_t*)clip_buf);
+        clip_size = WideCharToMultiByte(CP_UTF8, 0, (LPCWSTR)clip_buf, (int)len, NULL, 0, NULL, NULL);
+        break;
+    case CF_DIB:
+        clip_size = (int)GlobalSize(clip_data);
+        break;
+    }
+
     if (!clip_size) {
         GlobalUnlock(clip_data);
         CloseClipboard();
@@ -757,11 +897,48 @@ bool VDAgent::on_clipboard_change()
     _out_msg->opaque = 0;
     _out_msg->size = (uint32_t)(sizeof(VDAgentClipboard) + clip_size);
     VDAgentClipboard* clipboard = (VDAgentClipboard*)_out_msg->data;
-    clipboard->type = VD_AGENT_CLIPBOARD_UTF8_TEXT;
-    WideCharToMultiByte(CP_UTF8, 0, (LPCWSTR)clip_buf, -1, (LPSTR)clipboard->data, clip_size, NULL, NULL);
+    clipboard->type = clipboard_request->type;
+
+    switch (format) {
+    case CF_UNICODETEXT:
+        WideCharToMultiByte(CP_UTF8, 0, (LPCWSTR)clip_buf, (int)len, (LPSTR)clipboard->data,
+                            clip_size, NULL, NULL);
+        break;
+    case CF_DIB:
+        memcpy(clipboard->data, clip_buf, clip_size);
+        break;
+    }
+
     GlobalUnlock(clip_data);
     CloseClipboard();
-    return write_clipboard();
+    write_clipboard();
+    return true;
+}
+
+bool VDAgent::handle_clipboard_release()
+{
+    SetEvent(_clipboard_event);
+    return true;
+}
+
+uint32_t VDAgent::get_clipboard_format(uint32_t type)
+{
+    for (VDClipboardFormat* iter = supported_clipboard_formats; iter->format && iter->type; iter++) {
+        if (iter->type == type) {
+            return iter->format;
+        }
+    }
+    return 0;
+}
+
+uint32_t VDAgent::get_clipboard_type(uint32_t format)
+{
+    for (VDClipboardFormat* iter = supported_clipboard_formats; iter->format && iter->type; iter++) {
+        if (iter->format == format) {
+            return iter->type;
+        }
+    }
+    return 0;
 }
 
 bool VDAgent::connect_pipe()
@@ -791,47 +968,47 @@ bool VDAgent::connect_pipe()
     vd_printf("Connected to service pipe");
     return true;
 }
+
 void VDAgent::dispatch_message(VDAgentMessage* msg, uint32_t port)
 {
     VDAgent* a = _singleton;
+    bool res = true;
 
     switch (msg->type) {
     case VD_AGENT_MOUSE_STATE:
-        if (!a->handle_mouse_event((VDAgentMouseState*)msg->data)) {
-            vd_printf("handle_mouse_event failed: %u", GetLastError());
-            a->_running = false;
-        }
+        res = a->handle_mouse_event((VDAgentMouseState*)msg->data);
         break;
     case VD_AGENT_MONITORS_CONFIG:
-        if (!a->handle_mon_config((VDAgentMonitorsConfig*)msg->data, port)) {
-            vd_printf("handle_mon_config failed: %u", GetLastError());
-            a->_running = false;
-        }
+        res = a->handle_mon_config((VDAgentMonitorsConfig*)msg->data, port);
         break;
-#ifdef CLIPBOARD_ENABLED
     case VD_AGENT_CLIPBOARD:
-        if (!a->handle_clipboard((VDAgentClipboard*)msg->data,
-                                 msg->size - sizeof(VDAgentClipboard))) {
-            vd_printf("handle_clipboard failed: %u", GetLastError());
-            a->_running = false;
+        res = a->handle_clipboard((VDAgentClipboard*)msg->data,
+                                  msg->size - sizeof(VDAgentClipboard));
+        break;
+    case VD_AGENT_CLIPBOARD_GRAB:
+        res = a->handle_clipboard_grab((VDAgentClipboardGrab*)msg->data);
+        break;
+    case VD_AGENT_CLIPBOARD_REQUEST:
+        res = a->handle_clipboard_request((VDAgentClipboardRequest*)msg->data);
+        if (!res) {
+            res = a->write_message(VD_AGENT_CLIPBOARD_RELEASE);
         }
         break;
-#endif // CLIPBOARD_ENABLED
+    case VD_AGENT_CLIPBOARD_RELEASE:
+        res = a->handle_clipboard_release();
+        break;
     case VD_AGENT_DISPLAY_CONFIG:
-        if (!a->handle_display_config((VDAgentDisplayConfig*)msg->data, port)) {
-            vd_printf("handle_display_config failed");
-            a->_running = false;
-        }
+        res = a->handle_display_config((VDAgentDisplayConfig*)msg->data, port);
         break;
     case VD_AGENT_ANNOUNCE_CAPABILITIES:
-        if (!a->handle_announce_capabilities((VDAgentAnnounceCapabilities*)msg->data,
-                msg->size)) {
-            vd_printf("handle_announce_capabilities failed");
-            a->_running = false;
-        }
+        res = a->handle_announce_capabilities((VDAgentAnnounceCapabilities*)msg->data, msg->size);
         break;
     default:
         vd_printf("Unsupported message type %u size %u", msg->type, msg->size);
+    }
+    if (!res) {
+        vd_printf("handling message type %u failed: %u", msg->type, GetLastError());
+        a->_running = false;
     }
 }
 
@@ -862,8 +1039,8 @@ VOID CALLBACK VDAgent::read_completion(DWORD err, DWORD bytes, LPOVERLAPPED over
             break;
         }
 
-        //FIXME: cleanup, specific to one port
-        if (a->_in_msg_pos == 0 || pipe_msg->opaque == 2 /*FIXME!*/) {
+        //FIXME: currently assumes that multi-part msg arrives only from client port
+        if (a->_in_msg_pos == 0 || pipe_msg->opaque == VDP_SERVER_PORT) {
             if (len < VD_MESSAGE_HEADER_SIZE) {
                 break;
             }
@@ -885,7 +1062,6 @@ VOID CALLBACK VDAgent::read_completion(DWORD err, DWORD bytes, LPOVERLAPPED over
         } else {
             memcpy((uint8_t*)a->_in_msg + a->_in_msg_pos, pipe_msg->data, pipe_msg->size);
             a->_in_msg_pos += pipe_msg->size;
-            //vd_printf("DEBUG: pipe_msg size %u pos %u total %u", pipe_msg->size, a->_in_msg_pos, sizeof(VDAgentMessage) + a->_in_msg->size);
             if (a->_in_msg_pos == sizeof(VDAgentMessage) + a->_in_msg->size) {
                 dispatch_message(a->_in_msg, 0);
                 a->_in_msg_pos = 0;
@@ -970,7 +1146,6 @@ LRESULT CALLBACK VDAgent::wnd_proc(HWND hwnd, UINT message, WPARAM wparam, LPARA
     case WM_TIMER:
         a->send_input();
         break;
-#ifdef CLIPBOARD_ENABLED
     case WM_CHANGECBCHAIN:
         if (a->_hwnd_next_viewer == (HWND)wparam) {
             a->_hwnd_next_viewer = (HWND)lparam;
@@ -986,7 +1161,15 @@ LRESULT CALLBACK VDAgent::wnd_proc(HWND hwnd, UINT message, WPARAM wparam, LPARA
         }
         SendMessage(a->_hwnd_next_viewer, message, wparam, lparam);
         break;
-#endif // CLIPBOARD_ENABLED
+    case WM_RENDERFORMAT:
+        a->on_clipboard_render((UINT)wparam);
+        break;
+    case WM_RENDERALLFORMATS:
+        vd_printf("WM_RENDERALLFORMATS");
+        break;
+    case WM_DESTROYCLIPBOARD:
+        vd_printf("WM_DESTROYCLIPBOARD");
+        break;
     default:
         return DefWindowProc(hwnd, message, wparam, lparam);
     }
