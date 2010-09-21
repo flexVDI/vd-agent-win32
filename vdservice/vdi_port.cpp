@@ -91,7 +91,7 @@ PTCHAR get_device_path(IN LPGUID interface_guid)
     len = req_len;
     if (!SetupDiGetDeviceInterfaceDetail(dev_info, &dev_interface, dev_interface_detail, len,
                                          &req_len, NULL)) {
-        vd_printf("Cannot get device interface details.\n");
+        vd_printf("Cannot get device interface details");
         SetupDiDestroyDeviceInfoList(dev_info);
         LocalFree(dev_interface_detail);
         return NULL;

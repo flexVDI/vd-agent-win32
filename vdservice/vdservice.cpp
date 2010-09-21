@@ -411,12 +411,6 @@ VOID WINAPI VDService::main(DWORD argc, TCHAR* argv[])
 #endif //DEBUG_VDSERVICE
 }
 
-typedef __declspec (align(1)) struct VDAgentDataChunk {
-    uint32_t port;
-    uint32_t size;
-    uint8_t data[0];
-} VDAgentDataChunk;
-
 bool VDService::execute()
 {
     SECURITY_ATTRIBUTES sec_attr;
@@ -1006,12 +1000,12 @@ void VDService::handle_pipe_data(DWORD bytes)
         if (read_size < sizeof(VDPipeMessage) + pipe_msg->size) {
             break;
         }
-        if (_vdi_port->write_ring_free_space() < sizeof(VDAgentDataChunk) + pipe_msg->size) {
+        if (_vdi_port->write_ring_free_space() < sizeof(VDIChunkHeader) + pipe_msg->size) {
             //vd_printf("DEBUG: no space in write ring %u", _vdi_port->write_ring_free_space());
             break;
         }
         if (!_pending_reset) {
-            VDAgentDataChunk chunk;
+            VDIChunkHeader chunk;
             chunk.port = pipe_msg->opaque;
             chunk.size = pipe_msg->size;
             if (_vdi_port->ring_write(&chunk, sizeof(chunk)) != sizeof(chunk) ||
@@ -1035,7 +1029,7 @@ void VDService::handle_pipe_data(DWORD bytes)
 void VDService::handle_port_data()
 {
     VDPipeMessage* pipe_msg;
-    VDAgentDataChunk chunk;
+    VDIChunkHeader chunk;
     int chunks_count = 0;
     DWORD count = 0;
 
