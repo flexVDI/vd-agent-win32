@@ -65,7 +65,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="WtsApi32.lib Userenv.lib Version.lib setupapi.lib"
+				AdditionalDependencies="WtsApi32.lib Userenv.lib Version.lib"
 				LinkIncremental="2"
 				GenerateDebugInformation="true"
 				SubSystem="1"
@@ -142,7 +142,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="WtsApi32.lib Userenv.lib Version.lib setupapi.lib"
+				AdditionalDependencies="WtsApi32.lib Userenv.lib Version.lib"
 				LinkIncremental="2"
 				GenerateDebugInformation="true"
 				SubSystem="1"
@@ -216,7 +216,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="WtsApi32.lib Userenv.lib Version.lib setupapi.lib"
+				AdditionalDependencies="WtsApi32.lib Userenv.lib Version.lib"
 				LinkIncremental="1"
 				GenerateDebugInformation="true"
 				SubSystem="1"
@@ -293,7 +293,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="WtsApi32.lib Userenv.lib Version.lib setupapi.lib"
+				AdditionalDependencies="WtsApi32.lib Userenv.lib Version.lib"
 				LinkIncremental="1"
 				GenerateDebugInformation="true"
 				SubSystem="1"
