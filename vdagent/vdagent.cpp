@@ -55,8 +55,8 @@ private:
     bool handle_clipboard_release();
     bool handle_display_config(VDAgentDisplayConfig* display_config, uint32_t port);
     bool handle_control(VDPipeMessage* msg);
-    bool on_clipboard_change();
-    bool on_clipboard_render(UINT format);
+    bool on_clipboard_grab();
+    bool on_clipboard_request(UINT format);
     DWORD get_buttons_change(DWORD last_buttons_state, DWORD new_buttons_state,
                              DWORD mask, DWORD down_flag, DWORD up_flag);
     static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
@@ -546,7 +546,7 @@ bool VDAgent::handle_clipboard(VDAgentClipboard* clipboard, uint32_t size)
         SetEvent(_clipboard_event);
         return true;
     }
-    // We retry clipboard open-empty-set-close only when there is a timeout in on_clipboard_render()
+    // We retry clipboard open-empty-set-close only when there is a timeout in on_clipboard_request()
     if (!OpenClipboard(_hwnd)) {
         return false;
     }
@@ -593,7 +593,6 @@ bool VDAgent::send_announce_capabilities(bool request)
     if (!caps_pipe_msg) {
         return false;
     }
-
     caps_size = VD_AGENT_CAPS_SIZE;
     caps_pipe_msg->type = VD_AGENT_COMMAND;
     caps_pipe_msg->opaque = VDP_CLIENT_PORT;
@@ -609,9 +608,9 @@ bool VDAgent::send_announce_capabilities(bool request)
     VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_MOUSE_STATE);
     VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_MONITORS_CONFIG);
     VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_REPLY);
-    VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_CLIPBOARD);
     VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_DISPLAY_CONFIG);
-    vd_printf("sending capabilities:");
+    VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_CLIPBOARD_BY_DEMAND);
+    vd_printf("Sending capabilities:");
     for (uint32_t i = 0 ; i < caps_size; ++i) {
         vd_printf("%X", caps->caps[i]);
     }
@@ -622,29 +621,25 @@ bool VDAgent::send_announce_capabilities(bool request)
     return true;
 }
 
-bool VDAgent::handle_announce_capabilities(
-    VDAgentAnnounceCapabilities* announce_capabilities, uint32_t msg_size)
+bool VDAgent::handle_announce_capabilities(VDAgentAnnounceCapabilities* announce_capabilities,
+                                           uint32_t msg_size)
 {
     uint32_t caps_size = VD_AGENT_CAPS_SIZE_FROM_MSG_SIZE(msg_size);
 
-    vd_printf("got capabilities (%d)", caps_size);
+    vd_printf("Got capabilities (%d)", caps_size);
     for (uint32_t i = 0 ; i < caps_size; ++i) {
         vd_printf("%X", announce_capabilities->caps[i]);
     }
-
     if (caps_size != _client_caps_size) {
         delete[] _client_caps;
         _client_caps = new uint32_t[caps_size];
         ASSERT(_client_caps != NULL);
         _client_caps_size = caps_size;
     }
-    memcpy(_client_caps, announce_capabilities->caps,
-                         sizeof(_client_caps[0]) * caps_size);
-
+    memcpy(_client_caps, announce_capabilities->caps, sizeof(_client_caps[0]) * caps_size);
     if (announce_capabilities->request) {
         return send_announce_capabilities(false);
     }
-
     return true;
 }
 
@@ -794,10 +789,14 @@ bool VDAgent::write_message(uint32_t type, uint32_t size = 0, void* data = NULL)
     return true;
 }
 
-bool VDAgent::on_clipboard_change()
+bool VDAgent::on_clipboard_grab()
 {
     uint32_t type = 0;
 
+    if (!_client_caps || !VD_AGENT_HAS_CAPABILITY(_client_caps, _client_caps_size,
+                                                  VD_AGENT_CAP_CLIPBOARD_BY_DEMAND)) {
+        return true;
+    }
     for (VDClipboardFormat* iter = supported_clipboard_formats; iter->format && !type; iter++) {
         if (IsClipboardFormatAvailable(iter->format)) {
             type = iter->type;
@@ -815,11 +814,15 @@ bool VDAgent::on_clipboard_change()
 // handling WM_RENDERFORMAT. Therefore, we try our best by sending CLIPBOARD_REQUEST to the
 // agent, while waiting alertably for a while (hoping for good) for receiving CLIPBOARD data
 // or CLIPBOARD_RELEASE from the agent, which both will signal clipboard_event.
-bool VDAgent::on_clipboard_render(UINT format)
+bool VDAgent::on_clipboard_request(UINT format)
 {
-    uint32_t type = get_clipboard_type(format);
+    uint32_t type;
 
-    if (!type) {
+    if (!_client_caps || !VD_AGENT_HAS_CAPABILITY(_client_caps, _client_caps_size,
+                                                  VD_AGENT_CAP_CLIPBOARD_BY_DEMAND)) {
+        return true;
+    }
+    if (!(type = get_clipboard_type(format))) {
         vd_printf("Unsupported clipboard format %u", format);
         return false;
     }
@@ -1155,14 +1158,14 @@ LRESULT CALLBACK VDAgent::wnd_proc(HWND hwnd, UINT message, WPARAM wparam, LPARA
         break;
     case WM_DRAWCLIPBOARD:
         if (!a->_clipboard_changer) {
-            a->on_clipboard_change();
+            a->on_clipboard_grab();
         } else {
             a->_clipboard_changer = false;
         }
         SendMessage(a->_hwnd_next_viewer, message, wparam, lparam);
         break;
     case WM_RENDERFORMAT:
-        a->on_clipboard_render((UINT)wparam);
+        a->on_clipboard_request((UINT)wparam);
         break;
     case WM_RENDERALLFORMATS:
         vd_printf("WM_RENDERALLFORMATS");
