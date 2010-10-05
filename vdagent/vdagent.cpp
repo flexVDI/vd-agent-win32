@@ -33,7 +33,6 @@ typedef struct VDClipboardFormat {
 
 VDClipboardFormat supported_clipboard_formats[] = {
     {CF_UNICODETEXT, VD_AGENT_CLIPBOARD_UTF8_TEXT},
-    {CF_DIB, VD_AGENT_CLIPBOARD_BITMAP},
     {0, 0}};
 
 class VDAgent {
@@ -492,6 +491,7 @@ bool VDAgent::handle_mon_config(VDAgentMonitorsConfig* mon_config, uint32_t port
     return true;
 }
 
+//FIXME: handle clipboard->type == VD_AGENT_CLIPBOARD_NONE
 bool VDAgent::handle_clipboard(VDAgentClipboard* clipboard, uint32_t size)
 {
     HGLOBAL clip_data;
@@ -502,17 +502,14 @@ bool VDAgent::handle_clipboard(VDAgentClipboard* clipboard, uint32_t size)
     bool ret = false;
 
     // Get the required clipboard size
-    switch (format = get_clipboard_format(clipboard->type)) {
-    case CF_UNICODETEXT:
+    switch (clipboard->type) {
+    case VD_AGENT_CLIPBOARD_UTF8_TEXT:
         // Received utf8 string is not null-terminated   
         if (!(clip_len = MultiByteToWideChar(CP_UTF8, 0, (LPCSTR)clipboard->data, size, NULL, 0))) {
             return false;
         }
         clip_len++;
         clip_size = clip_len * sizeof(WCHAR);
-        break;
-    case CF_DIB:
-        clip_size = size;
         break;
     default:
         vd_printf("Unsupported clipboard type %u", clipboard->type);
@@ -527,21 +524,18 @@ bool VDAgent::handle_clipboard(VDAgentClipboard* clipboard, uint32_t size)
         return false;
     }
     // Translate data and set clipboard content
-    switch (format) {
-    case CF_UNICODETEXT:
+    switch (clipboard->type) {
+    case VD_AGENT_CLIPBOARD_UTF8_TEXT:
         ret = !!MultiByteToWideChar(CP_UTF8, 0, (LPCSTR)clipboard->data, size, (LPWSTR)clip_buf,
                                     clip_len);
         ((LPWSTR)clip_buf)[clip_len - 1] = L'\0';
-        break;
-    case CF_DIB:
-        memcpy(clip_buf, clipboard->data, size);
-        ret = true;
         break;
     }
     GlobalUnlock(clip_data);
     if (!ret) {
         return false;
     }
+    format = get_clipboard_format(clipboard->type);
     if (SetClipboardData(format, clip_data)) {
         SetEvent(_clipboard_event);
         return true;
@@ -806,8 +800,10 @@ bool VDAgent::on_clipboard_grab()
         vd_printf("Unsupported clipboard format");
         return false;
     }
-    VDAgentClipboardGrab grab = {type};
-    return write_message(VD_AGENT_CLIPBOARD_GRAB, sizeof(grab), &grab);  
+    
+    //FIXME: use all available types rather than just the first one 
+    uint32_t grab_types[] = {type};
+    return write_message(VD_AGENT_CLIPBOARD_GRAB, sizeof(grab_types), &grab_types);  
 }
 
 // In delayed rendering, Windows requires us to SetClipboardData before we return from
@@ -838,10 +834,11 @@ bool VDAgent::on_clipboard_request(UINT format)
 
 bool VDAgent::handle_clipboard_grab(VDAgentClipboardGrab* clipboard_grab)
 {
-    uint32_t format = get_clipboard_format(clipboard_grab->type);
+    //FIXME: use all types rather than just the first one 
+    uint32_t format = get_clipboard_format(clipboard_grab->types[0]);
 
     if (!format) {
-        vd_printf("Unsupported clipboard type %u", clipboard_grab->type);
+        vd_printf("Unsupported clipboard type %u", clipboard_grab->types[0]);
         return false;
     }
     if (!OpenClipboard(_hwnd)) {
@@ -854,6 +851,7 @@ bool VDAgent::handle_clipboard_grab(VDAgentClipboardGrab* clipboard_grab)
     return true;
 }
 
+//FIXME: when req type not supported, send (VD_AGENT_CLIPBOARD_NONE, NULL, 0)
 bool VDAgent::handle_clipboard_request(VDAgentClipboardRequest* clipboard_request)
 {
     UINT format;
@@ -877,13 +875,10 @@ bool VDAgent::handle_clipboard_request(VDAgentClipboardRequest* clipboard_reques
         CloseClipboard();
         return false;
     }
-    switch (format) {
-    case CF_UNICODETEXT:
+    switch (clipboard_request->type) {
+    case VD_AGENT_CLIPBOARD_UTF8_TEXT:
         len = wcslen((wchar_t*)clip_buf);
         clip_size = WideCharToMultiByte(CP_UTF8, 0, (LPCWSTR)clip_buf, (int)len, NULL, 0, NULL, NULL);
-        break;
-    case CF_DIB:
-        clip_size = (int)GlobalSize(clip_data);
         break;
     }
 
@@ -902,13 +897,10 @@ bool VDAgent::handle_clipboard_request(VDAgentClipboardRequest* clipboard_reques
     VDAgentClipboard* clipboard = (VDAgentClipboard*)_out_msg->data;
     clipboard->type = clipboard_request->type;
 
-    switch (format) {
-    case CF_UNICODETEXT:
+    switch (clipboard_request->type) {
+    case VD_AGENT_CLIPBOARD_UTF8_TEXT:
         WideCharToMultiByte(CP_UTF8, 0, (LPCWSTR)clip_buf, (int)len, (LPSTR)clipboard->data,
                             clip_size, NULL, NULL);
-        break;
-    case CF_DIB:
-        memcpy(clipboard->data, clip_buf, clip_size);
         break;
     }
 
