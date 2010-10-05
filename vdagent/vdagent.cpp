@@ -803,7 +803,7 @@ bool VDAgent::on_clipboard_grab()
     
     //FIXME: use all available types rather than just the first one 
     uint32_t grab_types[] = {type};
-    return write_message(VD_AGENT_CLIPBOARD_GRAB, sizeof(grab_types), &grab_types);  
+    return write_message(VD_AGENT_CLIPBOARD_GRAB, sizeof(grab_types), &grab_types);
 }
 
 // In delayed rendering, Windows requires us to SetClipboardData before we return from
@@ -986,7 +986,8 @@ void VDAgent::dispatch_message(VDAgentMessage* msg, uint32_t port)
     case VD_AGENT_CLIPBOARD_REQUEST:
         res = a->handle_clipboard_request((VDAgentClipboardRequest*)msg->data);
         if (!res) {
-            res = a->write_message(VD_AGENT_CLIPBOARD_RELEASE);
+            VDAgentClipboard clipboard = {VD_AGENT_CLIPBOARD_NONE};
+            res = a->write_message(VD_AGENT_CLIPBOARD, sizeof(clipboard), &clipboard);
         }
         break;
     case VD_AGENT_CLIPBOARD_RELEASE:
