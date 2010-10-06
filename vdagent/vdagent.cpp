@@ -83,7 +83,6 @@ private:
     static VDAgent* _singleton;
     HWND _hwnd;
     HWND _hwnd_next_viewer;
-    bool _clipboard_changer;
     int _clipboard_owner;
     DWORD _buttons_state;
     LONG _mouse_x;
@@ -128,7 +127,6 @@ VDAgent* VDAgent::get()
 VDAgent::VDAgent()
     : _hwnd (NULL)
     , _hwnd_next_viewer (NULL)
-    , _clipboard_changer (true)
     , _clipboard_owner (owner_none)
     , _buttons_state (0)
     , _mouse_x (0)
@@ -875,7 +873,6 @@ bool VDAgent::handle_clipboard_grab(VDAgentClipboardGrab* clipboard_grab)
     if (!OpenClipboard(_hwnd)) {
         return false;
     }
-    _clipboard_changer = true;
     EmptyClipboard();
     SetClipboardData(format, NULL);
     CloseClipboard();
@@ -1199,12 +1196,13 @@ LRESULT CALLBACK VDAgent::wnd_proc(HWND hwnd, UINT message, WPARAM wparam, LPARA
         }
         break;
     case WM_DRAWCLIPBOARD:
-        if (!a->_clipboard_changer) {
+        if (a->_hwnd != GetClipboardOwner()) {
+            a->set_clipboard_owner(a->owner_none);
             a->on_clipboard_grab();
-        } else {
-            a->_clipboard_changer = false;
         }
-        SendMessage(a->_hwnd_next_viewer, message, wparam, lparam);
+        if (a->_hwnd_next_viewer) {
+            SendMessage(a->_hwnd_next_viewer, message, wparam, lparam);
+        }
         break;
     case WM_RENDERFORMAT:
         a->on_clipboard_request((UINT)wparam);
