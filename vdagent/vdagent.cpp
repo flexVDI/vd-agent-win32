@@ -51,11 +51,12 @@ private:
     bool handle_clipboard(VDAgentClipboard* clipboard, uint32_t size);
     bool handle_clipboard_grab(VDAgentClipboardGrab* clipboard_grab);
     bool handle_clipboard_request(VDAgentClipboardRequest* clipboard_request);
-    bool handle_clipboard_release();
+    void handle_clipboard_release();
     bool handle_display_config(VDAgentDisplayConfig* display_config, uint32_t port);
     bool handle_control(VDPipeMessage* msg);
-    bool on_clipboard_grab();
-    bool on_clipboard_request(UINT format);
+    void on_clipboard_grab();
+    void on_clipboard_request(UINT format);
+    void on_clipboard_release();
     DWORD get_buttons_change(DWORD last_buttons_state, DWORD new_buttons_state,
                              DWORD mask, DWORD down_flag, DWORD up_flag);
     static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
@@ -65,6 +66,8 @@ private:
     static void dispatch_message(VDAgentMessage* msg, uint32_t port);
     static uint32_t get_clipboard_format(uint32_t type);
     static uint32_t get_clipboard_type(uint32_t format);
+    enum { owner_none, owner_guest, owner_client };
+    void set_clipboard_owner(int new_owner);
     uint8_t* write_lock(DWORD bytes = 0);
     void write_unlock(DWORD bytes = 0);
     bool write_message(uint32_t type, uint32_t size, void* data);
@@ -81,6 +84,7 @@ private:
     HWND _hwnd;
     HWND _hwnd_next_viewer;
     bool _clipboard_changer;
+    int _clipboard_owner;
     DWORD _buttons_state;
     LONG _mouse_x;
     LONG _mouse_y;
@@ -125,6 +129,7 @@ VDAgent::VDAgent()
     : _hwnd (NULL)
     , _hwnd_next_viewer (NULL)
     , _clipboard_changer (true)
+    , _clipboard_owner (owner_none)
     , _buttons_state (0)
     , _mouse_x (0)
     , _mouse_y (0)
@@ -491,7 +496,6 @@ bool VDAgent::handle_mon_config(VDAgentMonitorsConfig* mon_config, uint32_t port
     return true;
 }
 
-//FIXME: handle clipboard->type == VD_AGENT_CLIPBOARD_NONE
 bool VDAgent::handle_clipboard(VDAgentClipboard* clipboard, uint32_t size)
 {
     HGLOBAL clip_data;
@@ -501,6 +505,15 @@ bool VDAgent::handle_clipboard(VDAgentClipboard* clipboard, uint32_t size)
     UINT format;
     bool ret = false;
 
+    if (_clipboard_owner != owner_client) {
+        vd_printf("Received clipboard data from client while clipboard is not owned by client");
+        SetEvent(_clipboard_event);
+        return false;
+    }
+    if (clipboard->type == VD_AGENT_CLIPBOARD_NONE) {
+        SetEvent(_clipboard_event);
+        return false;
+    }
     // Get the required clipboard size
     switch (clipboard->type) {
     case VD_AGENT_CLIPBOARD_UTF8_TEXT:
@@ -513,7 +526,7 @@ bool VDAgent::handle_clipboard(VDAgentClipboard* clipboard, uint32_t size)
         break;
     default:
         vd_printf("Unsupported clipboard type %u", clipboard->type);
-        return false;
+        return true;
     }
     // Allocate and lock clipboard memory
     if (!(clip_data = GlobalAlloc(GMEM_DDESHARE, clip_size))) {
@@ -783,14 +796,11 @@ bool VDAgent::write_message(uint32_t type, uint32_t size = 0, void* data = NULL)
     return true;
 }
 
-bool VDAgent::on_clipboard_grab()
+//FIXME: send grab for all available types rather than just the first one
+void VDAgent::on_clipboard_grab()
 {
     uint32_t type = 0;
 
-    if (!_client_caps || !VD_AGENT_HAS_CAPABILITY(_client_caps, _client_caps_size,
-                                                  VD_AGENT_CAP_CLIPBOARD_BY_DEMAND)) {
-        return true;
-    }
     for (VDClipboardFormat* iter = supported_clipboard_formats; iter->format && !type; iter++) {
         if (IsClipboardFormatAvailable(iter->format)) {
             type = iter->type;
@@ -798,38 +808,59 @@ bool VDAgent::on_clipboard_grab()
     }
     if (!type) {
         vd_printf("Unsupported clipboard format");
-        return false;
-    }
-    
-    //FIXME: use all available types rather than just the first one 
+        return;
+    }  
+    if (!VD_AGENT_HAS_CAPABILITY(_client_caps, _client_caps_size,
+                                 VD_AGENT_CAP_CLIPBOARD_BY_DEMAND)) {
+        return;
+    } 
     uint32_t grab_types[] = {type};
-    return write_message(VD_AGENT_CLIPBOARD_GRAB, sizeof(grab_types), &grab_types);
+    write_message(VD_AGENT_CLIPBOARD_GRAB, sizeof(grab_types), &grab_types);
+    set_clipboard_owner(owner_guest);
 }
 
 // In delayed rendering, Windows requires us to SetClipboardData before we return from
 // handling WM_RENDERFORMAT. Therefore, we try our best by sending CLIPBOARD_REQUEST to the
 // agent, while waiting alertably for a while (hoping for good) for receiving CLIPBOARD data
 // or CLIPBOARD_RELEASE from the agent, which both will signal clipboard_event.
-bool VDAgent::on_clipboard_request(UINT format)
+// In case of unsupported format, wrong clipboard owner or no clipboard capability, we do nothing in
+// WM_RENDERFORMAT and return immediately.
+// FIXME: need to be handled using request queue
+void VDAgent::on_clipboard_request(UINT format)
 {
     uint32_t type;
 
-    if (!_client_caps || !VD_AGENT_HAS_CAPABILITY(_client_caps, _client_caps_size,
-                                                  VD_AGENT_CAP_CLIPBOARD_BY_DEMAND)) {
-        return true;
+    if (_clipboard_owner != owner_client) {
+        vd_printf("Received render request event for format %u"
+                  "while clipboard is not owned by client", format);
+        return;
     }
     if (!(type = get_clipboard_type(format))) {
         vd_printf("Unsupported clipboard format %u", format);
-        return false;
+        return;
+    }
+    if (!VD_AGENT_HAS_CAPABILITY(_client_caps, _client_caps_size,
+                                 VD_AGENT_CAP_CLIPBOARD_BY_DEMAND)) {
+        return;
     }
     VDAgentClipboardRequest request = {type};
     if (!write_message(VD_AGENT_CLIPBOARD_REQUEST, sizeof(request), &request)) {
-        return false;
+        return;
     }
     DWORD start_tick = GetTickCount();
     while (WaitForSingleObjectEx(_clipboard_event, 1000, TRUE) != WAIT_OBJECT_0 &&
            GetTickCount() < start_tick + VD_CLIPBOARD_TIMEOUT_MS);
-    return true;
+}
+
+void VDAgent::on_clipboard_release()
+{
+    if (!VD_AGENT_HAS_CAPABILITY(_client_caps, _client_caps_size,
+                                 VD_AGENT_CAP_CLIPBOARD_BY_DEMAND)) {
+        return;
+    }
+    if (_clipboard_owner == owner_guest) {
+        write_message(VD_AGENT_CLIPBOARD_RELEASE, 0, NULL);
+    }
 }
 
 bool VDAgent::handle_clipboard_grab(VDAgentClipboardGrab* clipboard_grab)
@@ -839,7 +870,7 @@ bool VDAgent::handle_clipboard_grab(VDAgentClipboardGrab* clipboard_grab)
 
     if (!format) {
         vd_printf("Unsupported clipboard type %u", clipboard_grab->types[0]);
-        return false;
+        return true;
     }
     if (!OpenClipboard(_hwnd)) {
         return false;
@@ -848,10 +879,12 @@ bool VDAgent::handle_clipboard_grab(VDAgentClipboardGrab* clipboard_grab)
     EmptyClipboard();
     SetClipboardData(format, NULL);
     CloseClipboard();
+    set_clipboard_owner(owner_client);
     return true;
 }
 
-//FIXME: when req type not supported, send (VD_AGENT_CLIPBOARD_NONE, NULL, 0)
+// If handle_clipboard_request() fails, its caller sends VD_AGENT_CLIPBOARD message with type
+// VD_AGENT_CLIPBOARD_NONE and no data, so the client will know the request failed.
 bool VDAgent::handle_clipboard_request(VDAgentClipboardRequest* clipboard_request)
 {
     UINT format;
@@ -860,6 +893,10 @@ bool VDAgent::handle_clipboard_request(VDAgentClipboardRequest* clipboard_reques
     int clip_size;
     size_t len;
 
+    if (_clipboard_owner != owner_guest) {
+        vd_printf("Received clipboard request from client while clipboard is not owned by guest");
+        return false;
+    }
     if (!(format = get_clipboard_format(clipboard_request->type))) {
         vd_printf("Unsupported clipboard type %u", clipboard_request->type);
         return false;
@@ -910,10 +947,14 @@ bool VDAgent::handle_clipboard_request(VDAgentClipboardRequest* clipboard_reques
     return true;
 }
 
-bool VDAgent::handle_clipboard_release()
+void VDAgent::handle_clipboard_release()
 {
+    if (_clipboard_owner != owner_client) {
+        vd_printf("Received clipboard release from client while clipboard is not owned by client");
+        return;
+    }
     SetEvent(_clipboard_event);
-    return true;
+    set_clipboard_owner(owner_none);
 }
 
 uint32_t VDAgent::get_clipboard_format(uint32_t type)
@@ -934,6 +975,15 @@ uint32_t VDAgent::get_clipboard_type(uint32_t format)
         }
     }
     return 0;
+}
+
+void VDAgent::set_clipboard_owner(int new_owner)
+{
+    // FIXME: Clear requests, clipboard data and state
+    if (new_owner == owner_none) {
+        on_clipboard_release();
+    }
+    _clipboard_owner = new_owner;
 }
 
 bool VDAgent::connect_pipe()
@@ -977,11 +1027,10 @@ void VDAgent::dispatch_message(VDAgentMessage* msg, uint32_t port)
         res = a->handle_mon_config((VDAgentMonitorsConfig*)msg->data, port);
         break;
     case VD_AGENT_CLIPBOARD:
-        res = a->handle_clipboard((VDAgentClipboard*)msg->data,
-                                  msg->size - sizeof(VDAgentClipboard));
+        a->handle_clipboard((VDAgentClipboard*)msg->data, msg->size - sizeof(VDAgentClipboard));
         break;
     case VD_AGENT_CLIPBOARD_GRAB:
-        res = a->handle_clipboard_grab((VDAgentClipboardGrab*)msg->data);
+        a->handle_clipboard_grab((VDAgentClipboardGrab*)msg->data);        
         break;
     case VD_AGENT_CLIPBOARD_REQUEST:
         res = a->handle_clipboard_request((VDAgentClipboardRequest*)msg->data);
@@ -991,7 +1040,7 @@ void VDAgent::dispatch_message(VDAgentMessage* msg, uint32_t port)
         }
         break;
     case VD_AGENT_CLIPBOARD_RELEASE:
-        res = a->handle_clipboard_release();
+        a->handle_clipboard_release();
         break;
     case VD_AGENT_DISPLAY_CONFIG:
         res = a->handle_display_config((VDAgentDisplayConfig*)msg->data, port);
