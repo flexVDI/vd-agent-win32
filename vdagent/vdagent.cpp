@@ -31,9 +31,11 @@ typedef struct VDClipboardFormat {
     uint32_t type;
 } VDClipboardFormat;
 
-VDClipboardFormat supported_clipboard_formats[] = {
+VDClipboardFormat clipboard_formats[] = {
     {CF_UNICODETEXT, VD_AGENT_CLIPBOARD_UTF8_TEXT},
     {0, 0}};
+
+#define clipboard_formats_count (sizeof(clipboard_formats) / sizeof(clipboard_formats[0]))
 
 class VDAgent {
 public:
@@ -49,7 +51,7 @@ private:
                                       uint32_t msg_size);
     bool handle_mon_config(VDAgentMonitorsConfig* mon_config, uint32_t port);
     bool handle_clipboard(VDAgentClipboard* clipboard, uint32_t size);
-    bool handle_clipboard_grab(VDAgentClipboardGrab* clipboard_grab);
+    bool handle_clipboard_grab(VDAgentClipboardGrab* clipboard_grab, uint32_t size);
     bool handle_clipboard_request(VDAgentClipboardRequest* clipboard_request);
     void handle_clipboard_release();
     bool handle_display_config(VDAgentDisplayConfig* display_config, uint32_t port);
@@ -794,27 +796,27 @@ bool VDAgent::write_message(uint32_t type, uint32_t size = 0, void* data = NULL)
     return true;
 }
 
-//FIXME: send grab for all available types rather than just the first one
 void VDAgent::on_clipboard_grab()
 {
-    uint32_t type = 0;
+    uint32_t* types = new uint32_t[clipboard_formats_count];
+    int count = 0;
 
-    for (VDClipboardFormat* iter = supported_clipboard_formats; iter->format && !type; iter++) {
-        if (IsClipboardFormatAvailable(iter->format)) {
-            type = iter->type;
-        }
-    }
-    if (!type) {
-        vd_printf("Unsupported clipboard format");
-        return;
-    }  
     if (!VD_AGENT_HAS_CAPABILITY(_client_caps, _client_caps_size,
                                  VD_AGENT_CAP_CLIPBOARD_BY_DEMAND)) {
         return;
     } 
-    uint32_t grab_types[] = {type};
-    write_message(VD_AGENT_CLIPBOARD_GRAB, sizeof(grab_types), &grab_types);
-    set_clipboard_owner(owner_guest);
+    for (VDClipboardFormat* iter = clipboard_formats; iter->format; iter++) {
+        if (IsClipboardFormatAvailable(iter->format)) {
+            types[count++] = iter->type;
+        }
+    }
+    if (count) {
+        write_message(VD_AGENT_CLIPBOARD_GRAB, count * sizeof(types[0]), types);
+        set_clipboard_owner(owner_guest);
+    } else {
+        vd_printf("Unsupported clipboard format");       
+    }  
+    delete[] types;
 }
 
 // In delayed rendering, Windows requires us to SetClipboardData before we return from
@@ -861,20 +863,30 @@ void VDAgent::on_clipboard_release()
     }
 }
 
-bool VDAgent::handle_clipboard_grab(VDAgentClipboardGrab* clipboard_grab)
+bool VDAgent::handle_clipboard_grab(VDAgentClipboardGrab* clipboard_grab, uint32_t size)
 {
-    //FIXME: use all types rather than just the first one 
-    uint32_t format = get_clipboard_format(clipboard_grab->types[0]);
+    bool has_supported_type = false;
+    uint32_t format;
 
-    if (!format) {
-        vd_printf("Unsupported clipboard type %u", clipboard_grab->types[0]);
+    for (uint32_t i = 0; i < size / sizeof(clipboard_grab->types[0]); i++) {
+        format = get_clipboard_format(clipboard_grab->types[i]);
+        //On first supported type, open and empty the clipboard
+        if (format && !has_supported_type) {
+            has_supported_type = true;
+            if (!OpenClipboard(_hwnd)) {
+                return false;
+            }
+            EmptyClipboard();
+        }
+        //For all supported type set delayed rendering
+        if (format) {
+            SetClipboardData(format, NULL);
+        }
+    }
+    if (!has_supported_type) {
+        vd_printf("No supported clipboard types in client grab");
         return true;
     }
-    if (!OpenClipboard(_hwnd)) {
-        return false;
-    }
-    EmptyClipboard();
-    SetClipboardData(format, NULL);
     CloseClipboard();
     set_clipboard_owner(owner_client);
     return true;
@@ -956,7 +968,7 @@ void VDAgent::handle_clipboard_release()
 
 uint32_t VDAgent::get_clipboard_format(uint32_t type)
 {
-    for (VDClipboardFormat* iter = supported_clipboard_formats; iter->format && iter->type; iter++) {
+    for (VDClipboardFormat* iter = clipboard_formats; iter->format && iter->type; iter++) {
         if (iter->type == type) {
             return iter->format;
         }
@@ -966,7 +978,7 @@ uint32_t VDAgent::get_clipboard_format(uint32_t type)
 
 uint32_t VDAgent::get_clipboard_type(uint32_t format)
 {
-    for (VDClipboardFormat* iter = supported_clipboard_formats; iter->format && iter->type; iter++) {
+    for (VDClipboardFormat* iter = clipboard_formats; iter->format && iter->type; iter++) {
         if (iter->format == format) {
             return iter->type;
         }
@@ -1027,7 +1039,7 @@ void VDAgent::dispatch_message(VDAgentMessage* msg, uint32_t port)
         a->handle_clipboard((VDAgentClipboard*)msg->data, msg->size - sizeof(VDAgentClipboard));
         break;
     case VD_AGENT_CLIPBOARD_GRAB:
-        a->handle_clipboard_grab((VDAgentClipboardGrab*)msg->data);        
+        a->handle_clipboard_grab((VDAgentClipboardGrab*)msg->data, msg->size);        
         break;
     case VD_AGENT_CLIPBOARD_REQUEST:
         res = a->handle_clipboard_request((VDAgentClipboardRequest*)msg->data);
