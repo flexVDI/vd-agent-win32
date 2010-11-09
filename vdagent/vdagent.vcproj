@@ -352,10 +352,6 @@
 				RelativePath="..\common\vdlog.cpp"
 				>
 			</File>
-			<File
-				RelativePath="..\common\vdcommon.cpp"
-				>
-			</File>
 		</Filter>
 		<Filter
 			Name="Header Files"
@@ -380,10 +376,6 @@
 			</File>
 			<File
 				RelativePath="..\common\vdlog.h"
-				>
-			</File>
-			<File
-				RelativePath="..\common\vdcommon.cpp"
 				>
 			</File>
 		</Filter>

@@ -63,7 +63,5 @@ typedef struct VDPipeState {
     VDPipeBuffer read;
 } VDPipeState;
 
-bool get_qxl_device_id(TCHAR* device_key, DWORD* device_id);
-
 #endif
 

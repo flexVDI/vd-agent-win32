@@ -72,6 +72,7 @@ public:
 private:
     void clean_displays();
     static bool is_attached(LPCTSTR dev_name);
+    static bool get_qxl_device_id(WCHAR* device_key, DWORD* device_id);
     static void init_dev_mode(DEVMODE* dev_mode, DisplayMode* mode, bool set_pos);
 
 private:
