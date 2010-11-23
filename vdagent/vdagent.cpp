@@ -18,24 +18,40 @@
 #include "vdcommon.h"
 #include "desktop_layout.h"
 #include "display_setting.h"
+#include "ximage.h"
 #include <lmcons.h>
+#include <set>
 
 #define VD_AGENT_LOG_PATH       TEXT("%svdagent.log")
 #define VD_AGENT_WINCLASS_NAME  TEXT("VDAGENT")
 #define VD_INPUT_INTERVAL_MS    20
 #define VD_TIMER_ID             1
 #define VD_CLIPBOARD_TIMEOUT_MS 10000
+#define VD_CLIPBOARD_FORMAT_MAX_TYPES 16
 
+//FIXME: extract format/type stuff to win_vdagent_common for use by windows\platform.cpp as well
 typedef struct VDClipboardFormat {
     uint32_t format;
-    uint32_t type;
+    uint32_t types[VD_CLIPBOARD_FORMAT_MAX_TYPES];
 } VDClipboardFormat;
 
 VDClipboardFormat clipboard_formats[] = {
-    {CF_UNICODETEXT, VD_AGENT_CLIPBOARD_UTF8_TEXT},
-    {0, 0}};
+    {CF_UNICODETEXT, {VD_AGENT_CLIPBOARD_UTF8_TEXT, 0}},
+    //FIXME: support more image types
+    {CF_DIB, {VD_AGENT_CLIPBOARD_IMAGE_PNG, VD_AGENT_CLIPBOARD_IMAGE_BMP, 0}},
+};
 
 #define clipboard_formats_count (sizeof(clipboard_formats) / sizeof(clipboard_formats[0]))
+
+typedef struct ImageType {
+    uint32_t type;
+    DWORD cximage_format;
+} ImageType;
+
+static ImageType image_types[] = {
+    {VD_AGENT_CLIPBOARD_IMAGE_PNG, CXIMAGE_FORMAT_PNG},
+    {VD_AGENT_CLIPBOARD_IMAGE_BMP, CXIMAGE_FORMAT_BMP},
+};
 
 class VDAgent {
 public:
@@ -61,13 +77,15 @@ private:
     void on_clipboard_release();
     DWORD get_buttons_change(DWORD last_buttons_state, DWORD new_buttons_state,
                              DWORD mask, DWORD down_flag, DWORD up_flag);
+    static HGLOBAL utf8_alloc(LPCSTR data, int size);
     static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
     static VOID CALLBACK read_completion(DWORD err, DWORD bytes, LPOVERLAPPED overlap);
     static VOID CALLBACK write_completion(DWORD err, DWORD bytes, LPOVERLAPPED overlap);
     static DWORD WINAPI event_thread_proc(LPVOID param);
     static void dispatch_message(VDAgentMessage* msg, uint32_t port);
-    static uint32_t get_clipboard_format(uint32_t type);
-    static uint32_t get_clipboard_type(uint32_t format);
+    uint32_t get_clipboard_format(uint32_t type);
+    uint32_t get_clipboard_type(uint32_t format);
+    DWORD get_cximage_format(uint32_t type);
     enum { owner_none, owner_guest, owner_client };
     void set_clipboard_owner(int new_owner);
     uint8_t* write_lock(DWORD bytes = 0);
@@ -112,6 +130,8 @@ private:
 
     uint32_t *_client_caps;
     uint32_t _client_caps_size;
+
+    std::set<uint32_t> _grab_types;
 
     VDLog* _log;
 };
@@ -162,6 +182,7 @@ VDAgent::VDAgent()
     ZeroMemory(&_input, sizeof(INPUT));
     ZeroMemory(&_pipe_state, sizeof(VDPipeState));
     MUTEX_INIT(_write_mutex);
+
     _singleton = this;
 }
 
@@ -498,10 +519,7 @@ bool VDAgent::handle_mon_config(VDAgentMonitorsConfig* mon_config, uint32_t port
 
 bool VDAgent::handle_clipboard(VDAgentClipboard* clipboard, uint32_t size)
 {
-    HGLOBAL clip_data;
-    LPVOID clip_buf;
-    int clip_size;
-    int clip_len;
+    HANDLE clip_data;
     UINT format;
     bool ret = false;
 
@@ -514,39 +532,21 @@ bool VDAgent::handle_clipboard(VDAgentClipboard* clipboard, uint32_t size)
         SetEvent(_clipboard_event);
         return false;
     }
-    // Get the required clipboard size
     switch (clipboard->type) {
     case VD_AGENT_CLIPBOARD_UTF8_TEXT:
-        // Received utf8 string is not null-terminated   
-        if (!(clip_len = MultiByteToWideChar(CP_UTF8, 0, (LPCSTR)clipboard->data, size, NULL, 0))) {
-            return false;
-        }
-        clip_len++;
-        clip_size = clip_len * sizeof(WCHAR);
+        clip_data = utf8_alloc((LPCSTR)clipboard->data, size);
         break;
+    case VD_AGENT_CLIPBOARD_IMAGE_PNG:
+    case VD_AGENT_CLIPBOARD_IMAGE_BMP: {
+        DWORD cximage_format = get_cximage_format(clipboard->type);
+        ASSERT(cximage_format);
+        CxImage image(clipboard->data, size, cximage_format);
+        clip_data = image.CopyToHandle();
+        break;
+    }
     default:
         vd_printf("Unsupported clipboard type %u", clipboard->type);
         return true;
-    }
-    // Allocate and lock clipboard memory
-    if (!(clip_data = GlobalAlloc(GMEM_DDESHARE, clip_size))) {
-        return false;
-    }
-    if (!(clip_buf = GlobalLock(clip_data))) {
-        GlobalFree(clip_data);
-        return false;
-    }
-    // Translate data and set clipboard content
-    switch (clipboard->type) {
-    case VD_AGENT_CLIPBOARD_UTF8_TEXT:
-        ret = !!MultiByteToWideChar(CP_UTF8, 0, (LPCSTR)clipboard->data, size, (LPWSTR)clip_buf,
-                                    clip_len);
-        ((LPWSTR)clip_buf)[clip_len - 1] = L'\0';
-        break;
-    }
-    GlobalUnlock(clip_data);
-    if (!ret) {
-        return false;
     }
     format = get_clipboard_format(clipboard->type);
     if (SetClipboardData(format, clip_data)) {
@@ -561,6 +561,36 @@ bool VDAgent::handle_clipboard(VDAgentClipboard* clipboard, uint32_t size)
     ret = !!SetClipboardData(format, clip_data);
     CloseClipboard();
     return ret;
+}
+
+HGLOBAL VDAgent::utf8_alloc(LPCSTR data, int size)
+{
+    HGLOBAL handle; 
+    LPVOID buf;
+    int len;
+
+    // Received utf8 string is not null-terminated   
+    if (!(len = MultiByteToWideChar(CP_UTF8, 0, data, size, NULL, 0))) {
+        return NULL;
+    }
+    len++;
+    // Allocate and lock clipboard memory
+    if (!(handle = GlobalAlloc(GMEM_DDESHARE, len * sizeof(WCHAR)))) {
+        return NULL;
+    }
+    if (!(buf = GlobalLock(handle))) {
+        GlobalFree(handle);
+        return NULL;
+    }  
+    // Translate data and set clipboard content
+    if (!(MultiByteToWideChar(CP_UTF8, 0, data, size, (LPWSTR)buf, len))) {
+        GlobalUnlock(handle);
+        GlobalFree(handle);
+        return NULL;
+    }
+    ((LPWSTR)buf)[len - 1] = L'\0';
+    GlobalUnlock(handle);
+    return handle;
 }
 
 void VDAgent::set_display_depth(uint32_t depth)
@@ -798,16 +828,18 @@ bool VDAgent::write_message(uint32_t type, uint32_t size = 0, void* data = NULL)
 
 void VDAgent::on_clipboard_grab()
 {
-    uint32_t* types = new uint32_t[clipboard_formats_count];
+    uint32_t* types = new uint32_t[clipboard_formats_count * VD_CLIPBOARD_FORMAT_MAX_TYPES];
     int count = 0;
 
     if (!VD_AGENT_HAS_CAPABILITY(_client_caps, _client_caps_size,
                                  VD_AGENT_CAP_CLIPBOARD_BY_DEMAND)) {
         return;
-    } 
-    for (VDClipboardFormat* iter = clipboard_formats; iter->format; iter++) {
-        if (IsClipboardFormatAvailable(iter->format)) {
-            types[count++] = iter->type;
+    }
+    for (int i = 0; i < clipboard_formats_count; i++) {
+        if (IsClipboardFormatAvailable(clipboard_formats[i].format)) {
+            for (uint32_t* ptype = clipboard_formats[i].types; *ptype; ptype++) {
+                types[count++] = *ptype;
+            }
         }
     }
     if (count) {
@@ -865,14 +897,14 @@ void VDAgent::on_clipboard_release()
 
 bool VDAgent::handle_clipboard_grab(VDAgentClipboardGrab* clipboard_grab, uint32_t size)
 {
-    bool has_supported_type = false;
-    uint32_t format;
+    std::set<uint32_t> grab_formats;
 
+    _grab_types.clear();
     for (uint32_t i = 0; i < size / sizeof(clipboard_grab->types[0]); i++) {
-        format = get_clipboard_format(clipboard_grab->types[i]);
+        vd_printf("grab %u", clipboard_grab->types[i]);
+        uint32_t format = get_clipboard_format(clipboard_grab->types[i]);
         //On first supported type, open and empty the clipboard
-        if (format && !has_supported_type) {
-            has_supported_type = true;
+        if (format && grab_formats.empty()) {
             if (!OpenClipboard(_hwnd)) {
                 return false;
             }
@@ -880,10 +912,13 @@ bool VDAgent::handle_clipboard_grab(VDAgentClipboardGrab* clipboard_grab, uint32
         }
         //For all supported type set delayed rendering
         if (format) {
-            SetClipboardData(format, NULL);
+            _grab_types.insert(clipboard_grab->types[i]);
+            if (grab_formats.insert(format).second) {
+                SetClipboardData(format, NULL);
+            }
         }
     }
-    if (!has_supported_type) {
+    if (grab_formats.empty()) {
         vd_printf("No supported clipboard types in client grab");
         return true;
     }
@@ -898,9 +933,10 @@ bool VDAgent::handle_clipboard_request(VDAgentClipboardRequest* clipboard_reques
 {
     UINT format;
     HANDLE clip_data;
-    LPVOID clip_buf;
-    int clip_size;
+    uint8_t* new_data = NULL;
+    long new_size;
     size_t len;
+    CxImage image;
 
     if (_clipboard_owner != owner_guest) {
         vd_printf("Received clipboard request from client while clipboard is not owned by guest");
@@ -917,40 +953,60 @@ bool VDAgent::handle_clipboard_request(VDAgentClipboardRequest* clipboard_reques
     if (!IsClipboardFormatAvailable(format) || !OpenClipboard(_hwnd)) {
         return false;
     }
-    if (!(clip_data = GetClipboardData(format)) || !(clip_buf = GlobalLock(clip_data))) {
+    if (!(clip_data = GetClipboardData(format))) {
         CloseClipboard();
         return false;
     }
     switch (clipboard_request->type) {
     case VD_AGENT_CLIPBOARD_UTF8_TEXT:
-        len = wcslen((wchar_t*)clip_buf);
-        clip_size = WideCharToMultiByte(CP_UTF8, 0, (LPCWSTR)clip_buf, (int)len, NULL, 0, NULL, NULL);
+        if (!(new_data = (uint8_t*)GlobalLock(clip_data))) {
+            break;
+        }
+        len = wcslen((LPCWSTR)new_data);
+        new_size = WideCharToMultiByte(CP_UTF8, 0, (LPCWSTR)new_data, (int)len, NULL, 0, NULL, NULL);
+        break;
+    case VD_AGENT_CLIPBOARD_IMAGE_PNG:
+    case VD_AGENT_CLIPBOARD_IMAGE_BMP: {
+        DWORD cximage_format = get_cximage_format(clipboard_request->type);
+        ASSERT(cximage_format);
+        if (!image.CreateFromHANDLE(clip_data)) {
+            vd_printf("Image create from handle failed");
+            break;
+        }
+        if (!image.Encode(new_data, new_size, cximage_format)) {
+            vd_printf("Image encode to type %u failed", clipboard_request->type);
+            break;
+        }
+        vd_printf("Image encoded to %u bytes", new_size);
         break;
     }
-
-    if (!clip_size) {
-        GlobalUnlock(clip_data);
+    }
+    if (!new_size) {
         CloseClipboard();
         return false;
     }
     _out_msg_pos = 0;
-    _out_msg_size = sizeof(VDAgentMessage) + sizeof(VDAgentClipboard) + clip_size;
+    _out_msg_size = sizeof(VDAgentMessage) + sizeof(VDAgentClipboard) + new_size;
     _out_msg = (VDAgentMessage*)new uint8_t[_out_msg_size];
     _out_msg->protocol = VD_AGENT_PROTOCOL;
     _out_msg->type = VD_AGENT_CLIPBOARD;
     _out_msg->opaque = 0;
-    _out_msg->size = (uint32_t)(sizeof(VDAgentClipboard) + clip_size);
+    _out_msg->size = (uint32_t)(sizeof(VDAgentClipboard) + new_size);
     VDAgentClipboard* clipboard = (VDAgentClipboard*)_out_msg->data;
     clipboard->type = clipboard_request->type;
 
     switch (clipboard_request->type) {
     case VD_AGENT_CLIPBOARD_UTF8_TEXT:
-        WideCharToMultiByte(CP_UTF8, 0, (LPCWSTR)clip_buf, (int)len, (LPSTR)clipboard->data,
-                            clip_size, NULL, NULL);
+        WideCharToMultiByte(CP_UTF8, 0, (LPCWSTR)new_data, (int)len, (LPSTR)clipboard->data,
+                            new_size, NULL, NULL);
+        GlobalUnlock(clip_data);
+        break;
+    case VD_AGENT_CLIPBOARD_IMAGE_PNG:
+    case VD_AGENT_CLIPBOARD_IMAGE_BMP:
+        memcpy(clipboard->data, new_data, new_size);
+        image.FreeMemory(new_data);
         break;
     }
-
-    GlobalUnlock(clip_data);
     CloseClipboard();
     write_clipboard();
     return true;
@@ -968,9 +1024,11 @@ void VDAgent::handle_clipboard_release()
 
 uint32_t VDAgent::get_clipboard_format(uint32_t type)
 {
-    for (VDClipboardFormat* iter = clipboard_formats; iter->format && iter->type; iter++) {
-        if (iter->type == type) {
-            return iter->format;
+    for (int i = 0; i < clipboard_formats_count; i++) {
+        for (uint32_t* ptype = clipboard_formats[i].types; *ptype; ptype++) {
+            if (*ptype == type) {
+                return clipboard_formats[i].format; 
+            }
         }
     }
     return 0;
@@ -978,9 +1036,29 @@ uint32_t VDAgent::get_clipboard_format(uint32_t type)
 
 uint32_t VDAgent::get_clipboard_type(uint32_t format)
 {
-    for (VDClipboardFormat* iter = clipboard_formats; iter->format && iter->type; iter++) {
-        if (iter->format == format) {
-            return iter->type;
+    uint32_t* types = NULL;
+
+    for (int i = 0; i < clipboard_formats_count && !types; i++) {
+        if (clipboard_formats[i].format == format) {
+            types = clipboard_formats[i].types;
+        }
+    }
+    if (!types) {
+        return 0;
+    }
+    for (uint32_t* ptype = types; *ptype; ptype++) {
+        if (_grab_types.find(*ptype) != _grab_types.end()) {
+            return *ptype;
+        }
+    }
+    return 0;
+}
+
+DWORD VDAgent::get_cximage_format(uint32_t type)
+{
+    for (int i = 0; i < sizeof(image_types) / sizeof(image_types[0]); i++) {
+        if (image_types[i].type == type) {
+            return image_types[i].cximage_format;
         }
     }
     return 0;

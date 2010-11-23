@@ -44,7 +44,7 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="..\common;$(SPICE_COMMON_DIR)"
+				AdditionalIncludeDirectories="..\common;&quot;$(SPICE_COMMON_DIR)&quot;;&quot;$(SPICE_LIBS)\include\CxImage&quot;"
 				PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS,_WIN32_WINNT=0x0501"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
@@ -65,8 +65,9 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="Version.lib"
+				AdditionalDependencies="Version.lib zlibwapiD.lib png_d.lib cximage_d.lib"
 				LinkIncremental="2"
+				AdditionalLibraryDirectories="&quot;$(SPICE_LIBS)\lib&quot;"
 				GenerateDebugInformation="true"
 				SubSystem="2"
 				RandomizedBaseAddress="1"
@@ -121,7 +122,7 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="..\common;$(SPICE_COMMON_DIR)"
+				AdditionalIncludeDirectories="..\common;&quot;$(SPICE_COMMON_DIR)&quot;;&quot;$(SPICE_LIBS)\include\CxImage&quot;"
 				PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS,_WIN32_WINNT=0x0501"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
@@ -142,8 +143,10 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="Version.lib"
+				AdditionalDependencies="Version.lib zlibwapiD.lib png_d.lib cximage_d.lib"
 				LinkIncremental="2"
+				AdditionalLibraryDirectories="&quot;$(SPICE_LIBS)\lib64&quot;"
+				IgnoreDefaultLibraryNames=""
 				GenerateDebugInformation="true"
 				SubSystem="2"
 				RandomizedBaseAddress="1"
@@ -197,7 +200,7 @@
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
-				AdditionalIncludeDirectories="..\common;$(SPICE_COMMON_DIR)"
+				AdditionalIncludeDirectories="..\common;&quot;$(SPICE_COMMON_DIR)&quot;;&quot;$(SPICE_LIBS)\include\CxImage&quot;"
 				AdditionalUsingDirectories=""
 				PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS,_WIN32_WINNT=0x0501"
 				RuntimeLibrary="0"
@@ -217,8 +220,9 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="Version.lib"
+				AdditionalDependencies="Version.lib zlibwapi.lib png.lib cximage.lib"
 				LinkIncremental="1"
+				AdditionalLibraryDirectories="&quot;$(SPICE_LIBS)\lib&quot;"
 				GenerateDebugInformation="true"
 				SubSystem="2"
 				OptimizeReferences="2"
@@ -275,7 +279,7 @@
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
-				AdditionalIncludeDirectories="..\common;$(SPICE_COMMON_DIR)"
+				AdditionalIncludeDirectories="..\common;&quot;$(SPICE_COMMON_DIR)&quot;;&quot;$(SPICE_LIBS)\include\CxImage&quot;"
 				AdditionalUsingDirectories=""
 				PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS,_WIN32_WINNT=0x0501"
 				RuntimeLibrary="0"
@@ -295,8 +299,9 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="Version.lib"
+				AdditionalDependencies="Version.lib zlibwapi.lib png.lib cximage.lib"
 				LinkIncremental="1"
+				AdditionalLibraryDirectories="&quot;$(SPICE_LIBS)\lib64&quot;"
 				GenerateDebugInformation="true"
 				SubSystem="2"
 				OptimizeReferences="2"
