@@ -106,25 +106,28 @@ void DesktopLayout::set_displays()
     dev_info.cb = sizeof(dev_info);
     ZeroMemory(&dev_mode, sizeof(dev_mode));
     dev_mode.dmSize = sizeof(dev_mode);
-    while (EnumDisplayDevices(NULL, dev_id, &dev_info, 0)) {
-        if (wcsstr(dev_info.DeviceString, L"QXL")) {
-            if (!get_qxl_device_id(dev_info.DeviceKey, &qxl_id)) {
-                vd_printf("get_qxl_device_id failed");
-                break;
-            }
-            if (qxl_id >= _displays.size()) {
-                vd_printf("qxl_id %u out of range, #displays %u", qxl_id, _displays.size());
-                break;
-            }
-            //FIXME: always set pos?
-            init_dev_mode(&dev_mode, _displays.at(qxl_id), true);
-            LONG ret = ChangeDisplaySettingsEx(dev_info.DeviceName, &dev_mode, NULL,
-                                               CDS_UPDATEREGISTRY | CDS_NORESET, NULL);
-            if (ret == DISP_CHANGE_SUCCESSFUL) {
-                dev_sets++;
-            }
+    while (EnumDisplayDevices(NULL, dev_id++, &dev_info, 0)) {
+        if (!wcsstr(dev_info.DeviceString, L"QXL")) {
+            continue;
         }
-        dev_id++;
+        if (!get_qxl_device_id(dev_info.DeviceKey, &qxl_id)) {
+            vd_printf("get_qxl_device_id failed");
+            break;
+        }
+        if (qxl_id >= _displays.size()) {
+            vd_printf("qxl_id %u out of range, #displays %u", qxl_id, _displays.size());
+            break;
+        }
+        if (!init_dev_mode(dev_info.DeviceName, &dev_mode, _displays.at(qxl_id), true)) {
+            vd_printf("No suitable mode found for display %S", dev_info.DeviceName);
+            break;
+        }
+        vd_printf("Set display mode %ux%u", dev_mode.dmPelsWidth, dev_mode.dmPelsHeight);
+        LONG ret = ChangeDisplaySettingsEx(dev_info.DeviceName, &dev_mode, NULL,
+                                           CDS_UPDATEREGISTRY | CDS_NORESET, NULL);
+        if (ret == DISP_CHANGE_SUCCESSFUL) {
+            dev_sets++;
+        }
     }
     if (dev_sets) {
         ChangeDisplaySettingsEx(NULL, NULL, NULL, 0, NULL);
@@ -173,23 +176,43 @@ bool DesktopLayout::get_qxl_device_id(WCHAR* device_key, DWORD* device_id)
     return key_found;
 }
 
-void DesktopLayout::init_dev_mode(DEVMODE* dev_mode, DisplayMode* mode, bool set_pos)
+bool DesktopLayout::init_dev_mode(LPCTSTR dev_name, DEVMODE* dev_mode, DisplayMode* mode,
+                                  bool set_pos)
 {
+    DWORD closest_diff = -1;
+    DWORD best = -1;
+
     ZeroMemory(dev_mode, sizeof(DEVMODE));
     dev_mode->dmSize = sizeof(DEVMODE);
-    if (mode && mode->get_attached()) {
-        dev_mode->dmBitsPerPel = mode->get_depth();
-        dev_mode->dmPelsWidth = mode->get_width();
-        dev_mode->dmPelsHeight = mode->get_height();
-        dev_mode->dmFields = DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT;
-        if (set_pos) {
-            dev_mode->dmPosition.x = mode->get_pos_x();
-            dev_mode->dmPosition.y = mode->get_pos_y();
-            dev_mode->dmFields |= DM_POSITION;
-        }
-    } else {
-        //detach monitor
+    if (!mode || !mode->_attached) {
+        //Detach monitor
         dev_mode->dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_POSITION;
+        return true;
     }
+    //Find the closest size which will fit within the monitor
+    for (DWORD i = 0; EnumDisplaySettings(dev_name, i, dev_mode); i++) {
+        if (dev_mode->dmPelsWidth > mode->_width ||
+            dev_mode->dmPelsHeight > mode->_height ||
+            dev_mode->dmBitsPerPel != mode->_depth) {
+            continue;
+        }
+        DWORD wdiff = mode->_width - dev_mode->dmPelsWidth;
+        DWORD hdiff = mode->_height - dev_mode->dmPelsHeight;
+        DWORD diff = wdiff * wdiff + hdiff * hdiff;
+        if (diff < closest_diff) {
+            closest_diff = diff;
+            best = i;
+        }
+    }
+    if (best == -1 || !EnumDisplaySettings(dev_name, best, dev_mode)) {
+        return false;
+    }
+    dev_mode->dmFields = DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT;
+    if (set_pos) {
+        dev_mode->dmPosition.x = mode->_pos_x;
+        dev_mode->dmPosition.y = mode->_pos_y;
+        dev_mode->dmFields |= DM_POSITION;
+    }
+    return true;
 }
 
