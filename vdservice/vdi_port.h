@@ -46,14 +46,23 @@ public:
     size_t ring_read(void* buf, size_t size);
     size_t read_ring_size();
     size_t read_ring_continuous_remaining_size();
-    HANDLE get_write_event() { return _write.overlap.hEvent; }
-    HANDLE get_read_event() { return _read.overlap.hEvent; }
+    unsigned get_num_events() { return 2; }
+    void fill_events(HANDLE *handle) {
+        handle[0] = _write.overlap.hEvent;
+        handle[1] = _read.overlap.hEvent;
+    }
+    void handle_event(int event) {
+        switch (event) {
+            case 0: write_completion(); break;
+            case 1: read_completion(); break;
+        }
+    }
     int write();
     int read();
-    void write_completion();
-    void read_completion();
 
 private:
+    void write_completion();
+    void read_completion();
     int handle_error();
 
 private:

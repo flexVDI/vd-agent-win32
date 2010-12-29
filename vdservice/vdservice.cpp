@@ -40,15 +40,19 @@
 #define CREATE_PROC_MAX_RETRIES 10
 #define CREATE_PROC_INTERVAL_MS 500
 
+// This enum simplifies WaitForMultipleEvents for static
+// events, that is handles that are guranteed non NULL.
+// It doesn't include:
+// VDIPort Handles - these are filled by an interface because
+//  of variable handle number.
+// VDAgent handle - this can be 1 or 0 (NULL or not), so it is also added at
+//  the end of VDService::_events
 enum {
     VD_EVENT_PIPE_READ = 0,
     VD_EVENT_PIPE_WRITE,
     VD_EVENT_CONTROL,
-    VD_EVENT_READ,
-    VD_EVENT_WRITE,
     VD_EVENT_LOGON,
-    VD_EVENT_AGENT, // Must be before last
-    VD_EVENTS_COUNT // Must be last
+    VD_STATIC_EVENTS_COUNT // Must be last
 };
 
 class VDService {
@@ -76,7 +80,15 @@ private:
     bool launch_agent();
     void send_logon();
     bool kill_agent();
-
+    unsigned fill_agent_event() {
+        ASSERT(_events);
+        if (_agent_proc_info.hProcess) {
+            _events[_events_count - 1] = _agent_proc_info.hProcess;
+            return _events_count;
+        } else {
+            return _events_count - 1;
+        }
+    }
 private:
     static VDService* _singleton;
     SERVICE_STATUS _status;
@@ -84,7 +96,7 @@ private:
     PROCESS_INFORMATION _agent_proc_info;
     HANDLE _control_event;
     HANDLE _logon_event;
-    HANDLE _events[VD_EVENTS_COUNT];
+    HANDLE* _events;
     TCHAR _agent_path[MAX_PATH];
     VDIPort* _vdi_port;
     VDPipeState _pipe_state;
@@ -103,6 +115,8 @@ private:
     bool _agent_alive;
     bool _running;
     VDLog* _log;
+    unsigned _events_count;
+    unsigned _events_vdi_port_base;
 };
 
 VDService* VDService::_singleton = NULL;
@@ -142,6 +156,7 @@ int supported_system_version()
 
 VDService::VDService()
     : _status_handle (0)
+    , _events (NULL)
     , _vdi_port (NULL)
     , _connection_id (0)
     , _session_id (0)
@@ -156,10 +171,11 @@ VDService::VDService()
     , _agent_alive (false)
     , _running (false)
     , _log (NULL)
+    , _events_count(0)
+    , _events_vdi_port_base(0)
 {
     ZeroMemory(&_agent_proc_info, sizeof(_agent_proc_info));
     ZeroMemory(&_pipe_state, sizeof(_pipe_state));
-    ZeroMemory(_events, sizeof(_events));
     _system_version = supported_system_version();
     _control_event = CreateEvent(NULL, FALSE, FALSE, NULL);
     _pipe_state.write.overlap.hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
@@ -176,6 +192,7 @@ VDService::~VDService()
     CloseHandle(_pipe_state.read.overlap.hEvent);
     CloseHandle(_pipe_state.write.overlap.hEvent);
     CloseHandle(_control_event);
+    delete _events;
     delete _log;
 }
 
@@ -423,14 +440,19 @@ bool VDService::execute()
         CloseHandle(pipe);
         return false;
     }
+    _events_count = VD_STATIC_EVENTS_COUNT + _vdi_port->get_num_events() + 1 /*for agent*/;
+    _events = new HANDLE[_events_count];
+    _events_vdi_port_base = VD_STATIC_EVENTS_COUNT;
+    ZeroMemory(_events, _events_count);
     vd_printf("Connected to server");
     _events[VD_EVENT_PIPE_READ] = _pipe_state.read.overlap.hEvent;
     _events[VD_EVENT_PIPE_WRITE] = _pipe_state.write.overlap.hEvent;
     _events[VD_EVENT_CONTROL] = _control_event;
-    _events[VD_EVENT_READ] = _vdi_port->get_read_event();
-    _events[VD_EVENT_WRITE] = _vdi_port->get_write_event();
     _events[VD_EVENT_LOGON] = _logon_event;
-    _events[VD_EVENT_AGENT] = _agent_proc_info.hProcess;
+    _agent_proc_info.hProcess;
+    vd_printf("Calling fill_events");
+    vd_printf("&_events[VD_ENVETS_COUNT] == %p", &_events[VD_STATIC_EVENTS_COUNT]);
+    _vdi_port->fill_events(&_events[_events_vdi_port_base]);
     _chunk_size = _chunk_port = 0;
     read_pipe();
     while (_running) {
@@ -456,8 +478,8 @@ bool VDService::execute()
             handle_pipe_data(0);
         }
         if (_running && (!cont || _pending_read || _pending_write)) {
-            DWORD events_count = _events[VD_EVENT_AGENT] ? VD_EVENTS_COUNT : VD_EVENTS_COUNT - 1;
-            DWORD wait_ret = WaitForMultipleObjects(events_count, _events, FALSE,
+            unsigned actual_events = fill_agent_event();
+            DWORD wait_ret = WaitForMultipleObjects(actual_events, _events, FALSE,
                                                               cont ? 0 : INFINITE);
             switch (wait_ret) {
             case WAIT_OBJECT_0 + VD_EVENT_PIPE_READ: {
@@ -482,28 +504,29 @@ bool VDService::execute()
             case WAIT_OBJECT_0 + VD_EVENT_CONTROL:
                 vd_printf("Control event");
                 break;
-            case WAIT_OBJECT_0 + VD_EVENT_READ:
-                _vdi_port->read_completion();
-                break;
-            case WAIT_OBJECT_0 + VD_EVENT_WRITE:
-                _vdi_port->write_completion();
-                break;
             case WAIT_OBJECT_0 + VD_EVENT_LOGON:
                 vd_printf("logon event");
                 write_agent_control(VD_AGENT_SESSION_LOGON, 0);
                 break;
-            case WAIT_OBJECT_0 + VD_EVENT_AGENT:
-                vd_printf("Agent killed");
-                if (_system_version == SYS_VER_WIN_XP) {
-                    restart_agent(false);
-                } else if (_system_version == SYS_VER_WIN_7) {
-                    kill_agent();
-                }
-                break;
             case WAIT_TIMEOUT:
                 break;
             default:
-                vd_printf("WaitForMultipleObjects failed %u", GetLastError());
+                if (wait_ret == WAIT_OBJECT_0 + _events_count - 1) {
+                    vd_printf("Agent killed");
+                    if (_system_version == SYS_VER_WIN_XP) {
+                        restart_agent(false);
+                    } else if (_system_version == SYS_VER_WIN_7) {
+                        kill_agent();
+                    }
+                } else {
+                    if (wait_ret >= WAIT_OBJECT_0 + _events_vdi_port_base &&
+                        wait_ret < WAIT_OBJECT_0 +
+                                   _events_vdi_port_base + _vdi_port->get_num_events()) {
+                        _vdi_port->handle_event(wait_ret - VD_STATIC_EVENTS_COUNT - WAIT_OBJECT_0);
+                    } else {
+                        vd_printf("WaitForMultipleObjects failed %u", GetLastError());
+                    }
+                }
             }
         }
     }
@@ -802,7 +825,6 @@ bool VDService::launch_agent()
         vd_printf("ConnectNamedPipe() failed: %u", GetLastError());
         return false;
     }
-    _events[VD_EVENT_AGENT] = _agent_proc_info.hProcess;
     return true;
 }
 
@@ -815,7 +837,6 @@ bool VDService::kill_agent()
     if (!_agent_alive) {
         return true;
     }
-    _events[VD_EVENT_AGENT] = 0;
     _agent_alive = false;
     if (_pipe_connected) {
         _pipe_connected = false;
@@ -909,8 +930,8 @@ void VDService::pipe_write_completion()
         } else {
             vd_printf("GetOverlappedResult() failed : %d", GetLastError());
         }
-	    _pending_write = false;
-	}
+        _pending_write = false;
+    }
 
     if (ps->write.start < ps->write.end) {
         _pending_write = true;
