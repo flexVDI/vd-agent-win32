@@ -43,7 +43,7 @@
 // This enum simplifies WaitForMultipleEvents for static
 // events, that is handles that are guranteed non NULL.
 // It doesn't include:
-// VDIPort Handles - these are filled by an interface because
+// VirtioVDIPort Handles - these are filled by an interface because
 //  of variable handle number.
 // VDAgent handle - this can be 1 or 0 (NULL or not), so it is also added at
 //  the end of VDService::_events
@@ -434,7 +434,7 @@ bool VDService::execute()
         CloseHandle(pipe);
         return false;
     }
-    _vdi_port = new VDIPort();
+    _vdi_port = new VirtioVDIPort();
     if (!_vdi_port->init()) {
         delete _vdi_port;
         CloseHandle(pipe);

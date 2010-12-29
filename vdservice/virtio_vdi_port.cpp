@@ -26,9 +26,9 @@
 
 #define MIN(a, b) ((a) > (b) ? (b) : (a))
 
-VDIPort* VDIPort::_singleton;
+VirtioVDIPort* VirtioVDIPort::_singleton;
 
-VDIPort::VDIPort()
+VirtioVDIPort::VirtioVDIPort()
     : _handle (INVALID_HANDLE_VALUE)
 {
     ZeroMemory(&_write, offsetof(VDIPortBuffer, ring));
@@ -38,7 +38,7 @@ VDIPort::VDIPort()
     _singleton = this;
 }
 
-VDIPort::~VDIPort()
+VirtioVDIPort::~VirtioVDIPort()
 {
     if (_handle != INVALID_HANDLE_VALUE) {
         CloseHandle(_handle);
@@ -51,7 +51,7 @@ VDIPort::~VDIPort()
     }
 }
 
-bool VDIPort::init()
+bool VirtioVDIPort::init()
 {
     _handle = CreateFile(VIOSERIAL_PORT_PATH, GENERIC_READ | GENERIC_WRITE , 0, NULL,
                          OPEN_EXISTING, FILE_FLAG_OVERLAPPED, NULL);
@@ -72,12 +72,12 @@ bool VDIPort::init()
     return true;
 }
 
-size_t VDIPort::write_ring_free_space()
+size_t VirtioVDIPort::write_ring_free_space()
 {
     return (BUF_SIZE + _write.start - _write.end - 1) % BUF_SIZE;
 }
 
-size_t VDIPort::ring_write(const void* buf, size_t size)
+size_t VirtioVDIPort::ring_write(const void* buf, size_t size)
 {
     size_t free_size = (BUF_SIZE + _write.start - _write.end - 1) % BUF_SIZE;
     size_t n;
@@ -98,7 +98,7 @@ size_t VDIPort::ring_write(const void* buf, size_t size)
     return size;
 }
 
-int VDIPort::write()
+int VirtioVDIPort::write()
 {
     int size;
     int ret;
@@ -126,7 +126,7 @@ int VDIPort::write()
     return ret;
 }
 
-void VDIPort::write_completion()
+void VirtioVDIPort::write_completion()
 {
     DWORD bytes;
 
@@ -142,12 +142,12 @@ void VDIPort::write_completion()
     _write.pending = false;
 }
 
-size_t VDIPort::read_ring_size()
+size_t VirtioVDIPort::read_ring_size()
 {
     return (BUF_SIZE + _read.end - _read.start) % BUF_SIZE;
 }
 
-size_t VDIPort::read_ring_continuous_remaining_size()
+size_t VirtioVDIPort::read_ring_continuous_remaining_size()
 {
     DWORD size;
 
@@ -159,7 +159,7 @@ size_t VDIPort::read_ring_continuous_remaining_size()
     return size;
 }
 
-size_t VDIPort::ring_read(void* buf, size_t size)
+size_t VirtioVDIPort::ring_read(void* buf, size_t size)
 {
     size_t n;
     size_t m = 0;
@@ -182,7 +182,7 @@ size_t VDIPort::ring_read(void* buf, size_t size)
     return n + m;
 }
 
-int VDIPort::read()
+int VirtioVDIPort::read()
 {
     int size;
     int ret;
@@ -213,7 +213,7 @@ int VDIPort::read()
     return ret;
 }
 
-void VDIPort::read_completion()
+void VirtioVDIPort::read_completion()
 {
     DWORD bytes;
 
@@ -227,7 +227,7 @@ void VDIPort::read_completion()
     _read.pending = false;
 }
 
-int VDIPort::handle_error()
+int VirtioVDIPort::handle_error()
 {
     switch (GetLastError()) {
     case ERROR_CONNECTION_INVALID:

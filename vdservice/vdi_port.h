@@ -38,27 +38,43 @@ typedef struct VDIPortBuffer {
 
 class VDIPort {
 public:
-    VDIPort();
-    ~VDIPort();
-    bool init();
-    size_t ring_write(const void* buf, size_t size);
-    size_t write_ring_free_space();
-    size_t ring_read(void* buf, size_t size);
-    size_t read_ring_size();
-    size_t read_ring_continuous_remaining_size();
-    unsigned get_num_events() { return 2; }
-    void fill_events(HANDLE *handle) {
+    virtual ~VDIPort() {}
+    virtual bool init() = 0;
+    virtual size_t ring_write(const void* buf, size_t size) = 0;
+    virtual size_t write_ring_free_space() = 0;
+    virtual size_t ring_read(void* buf, size_t size) = 0;
+    virtual size_t read_ring_size() = 0;
+    virtual size_t read_ring_continuous_remaining_size() = 0;
+    virtual unsigned get_num_events() = 0;
+    virtual void fill_events(HANDLE *handle) = 0;
+    virtual void handle_event(int event) = 0;
+    virtual int write() = 0;
+    virtual int read() = 0;
+};
+
+class VirtioVDIPort : public VDIPort {
+public:
+    VirtioVDIPort();
+    ~VirtioVDIPort();
+    virtual bool init();
+    virtual size_t ring_write(const void* buf, size_t size);
+    virtual size_t write_ring_free_space();
+    virtual size_t ring_read(void* buf, size_t size);
+    virtual size_t read_ring_size();
+    virtual size_t read_ring_continuous_remaining_size();
+    virtual unsigned get_num_events() { return 2; }
+    virtual void fill_events(HANDLE *handle) {
         handle[0] = _write.overlap.hEvent;
         handle[1] = _read.overlap.hEvent;
     }
-    void handle_event(int event) {
+    virtual void handle_event(int event) {
         switch (event) {
             case 0: write_completion(); break;
             case 1: read_completion(); break;
         }
     }
-    int write();
-    int read();
+    virtual int write();
+    virtual int read();
 
 private:
     void write_completion();
@@ -66,7 +82,7 @@ private:
     int handle_error();
 
 private:
-    static VDIPort* _singleton;
+    static VirtioVDIPort* _singleton;
     HANDLE _handle;
     VDIPortBuffer _write;
     VDIPortBuffer _read;
