@@ -22,7 +22,7 @@
 #include <stdio.h>
 #include <tlhelp32.h>
 #include "vdcommon.h"
-#include "vdi_port.h"
+#include "virtio_vdi_port.h"
 
 //#define DEBUG_VDSERVICE
 
@@ -450,8 +450,6 @@ bool VDService::execute()
     _events[VD_EVENT_CONTROL] = _control_event;
     _events[VD_EVENT_LOGON] = _logon_event;
     _agent_proc_info.hProcess;
-    vd_printf("Calling fill_events");
-    vd_printf("&_events[VD_ENVETS_COUNT] == %p", &_events[VD_STATIC_EVENTS_COUNT]);
     _vdi_port->fill_events(&_events[_events_vdi_port_base]);
     _chunk_size = _chunk_port = 0;
     read_pipe();

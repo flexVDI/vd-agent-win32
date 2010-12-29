@@ -21,6 +21,8 @@
 #include <windows.h>
 #include <stdint.h>
 
+#define MIN(a, b) ((a) > (b) ? (b) : (a))
+
 #define BUF_SIZE    (1024 * 1024)
 
 #define VDI_PORT_BLOCKED    0
@@ -38,62 +40,25 @@ typedef struct VDIPortBuffer {
 
 class VDIPort {
 public:
+    VDIPort();
     virtual ~VDIPort() {}
+
+    size_t ring_write(const void* buf, size_t size);
+    size_t write_ring_free_space();
+    size_t ring_read(void* buf, size_t size);
+    size_t read_ring_size();
+    size_t read_ring_continuous_remaining_size();
+
     virtual bool init() = 0;
-    virtual size_t ring_write(const void* buf, size_t size) = 0;
-    virtual size_t write_ring_free_space() = 0;
-    virtual size_t ring_read(void* buf, size_t size) = 0;
-    virtual size_t read_ring_size() = 0;
-    virtual size_t read_ring_continuous_remaining_size() = 0;
     virtual unsigned get_num_events() = 0;
     virtual void fill_events(HANDLE *handle) = 0;
     virtual void handle_event(int event) = 0;
     virtual int write() = 0;
     virtual int read() = 0;
-};
 
-class VirtioVDIPort : public VDIPort {
-public:
-    VirtioVDIPort();
-    ~VirtioVDIPort();
-    virtual bool init();
-    virtual size_t ring_write(const void* buf, size_t size);
-    virtual size_t write_ring_free_space();
-    virtual size_t ring_read(void* buf, size_t size);
-    virtual size_t read_ring_size();
-    virtual size_t read_ring_continuous_remaining_size();
-    virtual unsigned get_num_events() { return 2; }
-    virtual void fill_events(HANDLE *handle) {
-        handle[0] = _write.overlap.hEvent;
-        handle[1] = _read.overlap.hEvent;
-    }
-    virtual void handle_event(int event) {
-        switch (event) {
-            case 0: write_completion(); break;
-            case 1: read_completion(); break;
-        }
-    }
-    virtual int write();
-    virtual int read();
-
-private:
-    void write_completion();
-    void read_completion();
-    int handle_error();
-
-private:
-    static VirtioVDIPort* _singleton;
-    HANDLE _handle;
+protected:
     VDIPortBuffer _write;
     VDIPortBuffer _read;
 };
-
-// Ring notes:
-// _end is one after the end of data
-// _start==_end means empty ring
-// _start-1==_end (modulo) means full ring
-// _start-1 is never used
-// ring_write & read on right side of the ring (update _end)
-// ring_read & write from left (update _start)
 
 #endif
