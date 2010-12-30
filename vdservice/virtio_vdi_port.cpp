@@ -48,7 +48,6 @@ VirtioVDIPort::~VirtioVDIPort()
 
 bool VirtioVDIPort::init()
 {
-    vd_printf("creating VirtioVDIPort");
     _handle = CreateFile(VIOSERIAL_PORT_PATH, GENERIC_READ | GENERIC_WRITE , 0, NULL,
                          OPEN_EXISTING, FILE_FLAG_OVERLAPPED, NULL);
     if (_handle == INVALID_HANDLE_VALUE) {
@@ -155,18 +154,4 @@ void VirtioVDIPort::read_completion()
     _read.end = _read.ring + (_read.end - _read.ring + bytes) % BUF_SIZE;
     _read.bytes = bytes;
     _read.pending = false;
-}
-
-int VirtioVDIPort::handle_error()
-{
-    switch (GetLastError()) {
-    case ERROR_CONNECTION_INVALID:
-        vd_printf("port reset");
-        _write.start = _write.end = _write.ring;
-        _read.start = _read.end = _read.ring;
-        return VDI_PORT_RESET;
-    default:
-        vd_printf("port io failed: %u", GetLastError());
-        return VDI_PORT_ERROR;
-    }
 }

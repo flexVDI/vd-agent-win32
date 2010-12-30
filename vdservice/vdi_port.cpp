@@ -1,3 +1,4 @@
+#include "vdlog.h"
 #include "vdi_port.h"
 
 VDIPort::VDIPort()
@@ -7,7 +8,6 @@ VDIPort::VDIPort()
     ZeroMemory(&_read, offsetof(VDIPortBuffer, ring));
     _read.start = _read.end = _read.ring;
 }
-
 
 size_t VDIPort::read_ring_size()
 {
@@ -73,4 +73,18 @@ size_t VDIPort::ring_read(void* buf, size_t size)
     }
     _read.start = _read.ring + (_read.start - _read.ring + n + m) % BUF_SIZE;
     return n + m;
+}
+
+int VDIPort::handle_error()
+{
+    switch (GetLastError()) {
+    case ERROR_CONNECTION_INVALID:
+        vd_printf("port reset");
+        _write.start = _write.end = _write.ring;
+        _read.start = _read.end = _read.ring;
+        return VDI_PORT_RESET;
+    default:
+        vd_printf("port io failed: %u", GetLastError());
+        return VDI_PORT_ERROR;
+    }
 }

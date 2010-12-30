@@ -23,6 +23,7 @@
 #include <tlhelp32.h>
 #include "vdcommon.h"
 #include "virtio_vdi_port.h"
+#include "pci_vdi_port.h"
 
 //#define DEBUG_VDSERVICE
 
@@ -401,6 +402,16 @@ VOID WINAPI VDService::main(DWORD argc, TCHAR* argv[])
 #endif //DEBUG_VDSERVICE
 }
 
+VDIPort *create_virtio_vdi_port()
+{
+    return new VirtioVDIPort();
+}
+
+VDIPort *create_pci_vdi_port()
+{
+    return new PCIVDIPort();
+}
+
 bool VDService::execute()
 {
     SECURITY_ATTRIBUTES sec_attr;
@@ -434,12 +445,25 @@ bool VDService::execute()
         CloseHandle(pipe);
         return false;
     }
-    _vdi_port = new VirtioVDIPort();
-    if (!_vdi_port->init()) {
-        delete _vdi_port;
+
+    bool init = false;
+    {
+        VDIPort* (*creators[])(void) = { create_virtio_vdi_port, create_pci_vdi_port };
+        for (int i = 0 ; i < sizeof(creators)/sizeof(creators[0]); ++i) {
+            _vdi_port = creators[i]();
+            init = _vdi_port->init();
+            if (init) {
+                break;
+            }
+            delete _vdi_port;
+        }
+    }
+    if (!init) {
+        vd_printf("Failed to create VDIPort instance");
         CloseHandle(pipe);
         return false;
     }
+    vd_printf("created %s", _vdi_port->name());
     _events_count = VD_STATIC_EVENTS_COUNT + _vdi_port->get_num_events() + 1 /*for agent*/;
     _events = new HANDLE[_events_count];
     _events_vdi_port_base = VD_STATIC_EVENTS_COUNT;

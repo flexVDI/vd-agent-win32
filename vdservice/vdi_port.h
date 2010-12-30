@@ -49,6 +49,7 @@ public:
     size_t read_ring_size();
     size_t read_ring_continuous_remaining_size();
 
+    virtual const char *name() = 0;
     virtual bool init() = 0;
     virtual unsigned get_num_events() = 0;
     virtual void fill_events(HANDLE *handle) = 0;
@@ -57,6 +58,8 @@ public:
     virtual int read() = 0;
 
 protected:
+    int handle_error();
+
     VDIPortBuffer _write;
     VDIPortBuffer _read;
 };

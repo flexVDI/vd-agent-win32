@@ -18,6 +18,7 @@
 #ifndef _H_VDLOG
 #define _H_VDLOG
 
+#include <stdio.h>
 #include <tchar.h>
 #include <crtdbg.h>
 #include <windows.h>
