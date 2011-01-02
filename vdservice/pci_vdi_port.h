@@ -24,18 +24,23 @@
 #define BUF_WRITE   (1 << 1)
 #define BUF_ALL     (BUF_READ | BUF_WRITE)
 
+enum {
+    PCI_VDI_PORT_EVENT = 0,
+    PCI_VDI_PORT_EVENT_COUNT
+};
+
 class PCIVDIPort : public VDIPort {
 public:
     PCIVDIPort();
     ~PCIVDIPort();
     virtual bool init();
-    virtual const char *name() { return "PCIVDIPort"; }
+    virtual const char *name() {
+        return "PCIVDIPort";
+    }
     virtual int write();
     virtual int read();
-    virtual unsigned get_num_events() { return 1; }
-    virtual void fill_events(HANDLE *handle) {
-        handle[0] = _event;
-    }
+    virtual unsigned get_num_events() { return PCI_VDI_PORT_EVENT_COUNT; }
+    virtual void fill_events(HANDLE* handle);
     virtual void handle_event(int event);
 
 private:

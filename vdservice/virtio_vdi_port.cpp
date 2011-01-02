@@ -46,6 +46,24 @@ VirtioVDIPort::~VirtioVDIPort()
     }
 }
 
+void VirtioVDIPort::fill_events(HANDLE *handle) {
+    handle[VIRTIO_VDI_PORT_EVENT_WRITE] = _write.overlap.hEvent;
+    handle[VIRTIO_VDI_PORT_EVENT_READ] = _read.overlap.hEvent;
+}
+
+void VirtioVDIPort::handle_event(int event) {
+    switch (event) {
+        case VIRTIO_VDI_PORT_EVENT_WRITE:
+            write_completion();
+            break;
+        case VIRTIO_VDI_PORT_EVENT_READ:
+            read_completion();
+            break;
+        default:
+            vd_printf("ERROR: unexpected event %d", event);
+    }
+}
+
 bool VirtioVDIPort::init()
 {
     _handle = CreateFile(VIOSERIAL_PORT_PATH, GENERIC_READ | GENERIC_WRITE , 0, NULL,

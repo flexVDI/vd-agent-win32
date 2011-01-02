@@ -52,6 +52,10 @@ PCIVDIPort::~PCIVDIPort()
     }
 }
 
+void PCIVDIPort::fill_events(HANDLE *handle) {
+    handle[PCI_VDI_PORT_EVENT] = _event;
+}
+
 bool PCIVDIPort::init()
 {
     DWORD io_ret_len;

@@ -29,6 +29,14 @@
 #define VDI_PORT_RESET      -1
 #define VDI_PORT_ERROR      -2
 
+// Ring notes:
+// _end is one after the end of data
+// _start==_end means empty ring
+// _start-1==_end (modulo) means full ring
+// _start-1 is never used
+// ring_write & read on right side of the ring (update _end)
+// ring_read & write from left (update _start)
+
 typedef struct VDIPortBuffer {
     OVERLAPPED overlap;
     uint8_t* start;
