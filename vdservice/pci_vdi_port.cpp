@@ -52,8 +52,8 @@ PCIVDIPort::~PCIVDIPort()
     }
 }
 
-void PCIVDIPort::fill_events(HANDLE *handle) {
-    handle[PCI_VDI_PORT_EVENT] = _event;
+void PCIVDIPort::fill_events(HANDLE* handles) {
+    handles[PCI_VDI_PORT_EVENT] = _event;
 }
 
 bool PCIVDIPort::init()

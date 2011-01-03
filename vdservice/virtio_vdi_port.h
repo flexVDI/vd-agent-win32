@@ -16,7 +16,7 @@ public:
     virtual const char *name() { return "VirtioVDIPort"; }
     virtual bool init();
     virtual unsigned get_num_events() { return VIRTIO_VDI_PORT_EVENT_COUNT; }
-    virtual void fill_events(HANDLE *handle);
+    virtual void fill_events(HANDLE* handles);
     virtual void handle_event(int event);
     virtual int write();
     virtual int read();

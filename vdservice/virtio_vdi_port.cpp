@@ -46,9 +46,9 @@ VirtioVDIPort::~VirtioVDIPort()
     }
 }
 
-void VirtioVDIPort::fill_events(HANDLE *handle) {
-    handle[VIRTIO_VDI_PORT_EVENT_WRITE] = _write.overlap.hEvent;
-    handle[VIRTIO_VDI_PORT_EVENT_READ] = _read.overlap.hEvent;
+void VirtioVDIPort::fill_events(HANDLE* handles) {
+    handles[VIRTIO_VDI_PORT_EVENT_WRITE] = _write.overlap.hEvent;
+    handles[VIRTIO_VDI_PORT_EVENT_READ] = _read.overlap.hEvent;
 }
 
 void VirtioVDIPort::handle_event(int event) {
