@@ -512,7 +512,7 @@ bool VDService::execute()
                                             &bytes, FALSE) || GetLastError() == ERROR_MORE_DATA) {
                         handle_pipe_data(bytes);
                         read_pipe();
-                    } else {
+                    } else if (GetLastError() != ERROR_IO_INCOMPLETE) {
                         vd_printf("GetOverlappedResult failed %u", GetLastError());
                         _pipe_connected = false;
                         DisconnectNamedPipe(_pipe_state.pipe);
