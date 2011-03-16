@@ -42,7 +42,7 @@ void DesktopLayout::get_displays()
 {
     DISPLAY_DEVICE dev_info;
     DEVMODE mode;
-    DWORD qxl_id;
+    DWORD display_id;
     DWORD dev_id = 0;
     LONG min_x = 0;
     LONG min_y = 0;
@@ -51,37 +51,44 @@ void DesktopLayout::get_displays()
     bool attached;
 
     lock();
+    if (!consistent_displays()) {
+        unlock();
+        return;
+    }
     clean_displays();
     ZeroMemory(&dev_info, sizeof(dev_info));
     dev_info.cb = sizeof(dev_info);
     ZeroMemory(&mode, sizeof(mode));
     mode.dmSize = sizeof(mode);
     while (EnumDisplayDevices(NULL, dev_id, &dev_info, 0)) {
-        if (wcsstr(dev_info.DeviceString, L"QXL")) {
-            attached = !!(dev_info.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP);
-            EnumDisplaySettings(dev_info.DeviceName, ENUM_CURRENT_SETTINGS, &mode);
-            if (!get_qxl_device_id(dev_info.DeviceKey, &qxl_id)) {
-                vd_printf("get_qxl_device_id failed");
-                break;
-            }
-            size_t size = _displays.size();
-            if (qxl_id >= size) {
-                _displays.resize(qxl_id + 1);
-                for (size_t i = size; i < qxl_id; i++) {
-                    _displays[i] = NULL;
-                }
-            }
-            _displays[qxl_id] = new DisplayMode(mode.dmPosition.x, mode.dmPosition.y,
-                                                mode.dmPelsWidth, mode.dmPelsHeight,
-                                                mode.dmBitsPerPel, attached);
-            if (attached) {
-                min_x = min(min_x, mode.dmPosition.x);
-                min_y = min(min_y, mode.dmPosition.y);
-                max_x = max(max_x, mode.dmPosition.x + (LONG)mode.dmPelsWidth);
-                max_y = max(max_y, mode.dmPosition.y + (LONG)mode.dmPelsHeight);
+        dev_id++;
+        if (dev_info.StateFlags & DISPLAY_DEVICE_MIRRORING_DRIVER) {
+            continue;
+        }
+        size_t size = _displays.size();
+        if (!wcsstr(dev_info.DeviceString, L"QXL")) {
+            display_id = size;
+        } else if (!get_qxl_device_id(dev_info.DeviceKey, &display_id)) {
+            vd_printf("get_qxl_device_id failed %S", dev_info.DeviceKey);
+            break;
+        }
+        if (display_id >= size) {
+            _displays.resize(display_id + 1);
+            for (size_t i = size; i < display_id; i++) {
+                _displays[i] = NULL;
             }
         }
-        dev_id++;
+        attached = !!(dev_info.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP);
+        EnumDisplaySettings(dev_info.DeviceName, ENUM_CURRENT_SETTINGS, &mode);
+        _displays[display_id] = new DisplayMode(mode.dmPosition.x, mode.dmPosition.y,
+                                            mode.dmPelsWidth, mode.dmPelsHeight,
+                                            mode.dmBitsPerPel, attached);
+        if (attached) {
+            min_x = min(min_x, mode.dmPosition.x);
+            min_y = min(min_y, mode.dmPosition.y);
+            max_x = max(max_x, mode.dmPosition.x + (LONG)mode.dmPelsWidth);
+            max_y = max(max_y, mode.dmPosition.y + (LONG)mode.dmPelsHeight);
+        }
     }
     if (min_x || min_y) {
         for (Displays::iterator iter = _displays.begin(); iter != _displays.end(); iter++) {
@@ -98,27 +105,33 @@ void DesktopLayout::set_displays()
     DISPLAY_DEVICE dev_info;
     DEVMODE dev_mode;
     DWORD dev_id = 0;
-    DWORD qxl_id = 0;
+    DWORD display_id = 0;
     int dev_sets = 0;
 
     lock();
+    if (!consistent_displays()) {
+        unlock();
+        return;
+    }
     ZeroMemory(&dev_info, sizeof(dev_info));
     dev_info.cb = sizeof(dev_info);
     ZeroMemory(&dev_mode, sizeof(dev_mode));
     dev_mode.dmSize = sizeof(dev_mode);
-    while (EnumDisplayDevices(NULL, dev_id++, &dev_info, 0)) {
-        if (!wcsstr(dev_info.DeviceString, L"QXL")) {
+    while (EnumDisplayDevices(NULL, dev_id, &dev_info, 0)) {
+        dev_id++;
+        if (dev_info.StateFlags & DISPLAY_DEVICE_MIRRORING_DRIVER) {
             continue;
         }
-        if (!get_qxl_device_id(dev_info.DeviceKey, &qxl_id)) {
-            vd_printf("get_qxl_device_id failed");
+        bool is_qxl = !!wcsstr(dev_info.DeviceString, L"QXL");
+        if (is_qxl && !get_qxl_device_id(dev_info.DeviceKey, &display_id)) {
+            vd_printf("get_qxl_device_id failed %S", dev_info.DeviceKey);
             break;
         }
-        if (qxl_id >= _displays.size()) {
-            vd_printf("qxl_id %u out of range, #displays %u", qxl_id, _displays.size());
+        if (display_id >= _displays.size()) {
+            vd_printf("display_id %u out of range, #displays %u", display_id, _displays.size());
             break;
         }
-        if (!init_dev_mode(dev_info.DeviceName, &dev_mode, _displays.at(qxl_id), true)) {
+        if (!init_dev_mode(dev_info.DeviceName, &dev_mode, _displays.at(display_id), true)) {
             vd_printf("No suitable mode found for display %S", dev_info.DeviceName);
             break;
         }
@@ -128,11 +141,38 @@ void DesktopLayout::set_displays()
         if (ret == DISP_CHANGE_SUCCESSFUL) {
             dev_sets++;
         }
+        if (!is_qxl) {
+            display_id++;
+        }
     }
     if (dev_sets) {
         ChangeDisplaySettingsEx(NULL, NULL, NULL, 0, NULL);
     }
     unlock();
+}
+
+bool DesktopLayout::consistent_displays()
+{
+    DISPLAY_DEVICE dev_info;
+    DWORD dev_id = 0;
+    int non_qxl_count = 0;
+    int qxl_count = 0;
+
+    ZeroMemory(&dev_info, sizeof(dev_info));
+    dev_info.cb = sizeof(dev_info);
+    while (EnumDisplayDevices(NULL, dev_id, &dev_info, 0)) {
+        dev_id++;
+        if (dev_info.StateFlags & DISPLAY_DEVICE_MIRRORING_DRIVER) {
+            continue;
+        }
+        if (wcsstr(dev_info.DeviceString, L"QXL")) {
+            qxl_count++;
+        } else {
+            non_qxl_count++;
+        }
+    }
+    vd_printf("#qxls %d #others %d", qxl_count, non_qxl_count);
+    return (!qxl_count || !non_qxl_count);
 }
 
 void DesktopLayout::clean_displays()
