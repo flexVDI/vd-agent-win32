@@ -132,8 +132,8 @@ VDService* VDService::get()
 
 enum SystemVersion {
     SYS_VER_UNSUPPORTED,
-    SYS_VER_WIN_XP,
-    SYS_VER_WIN_7,
+    SYS_VER_WIN_XP_CLASS, // also Server 2003/R2
+    SYS_VER_WIN_7_CLASS,  // also Server 2008/R2 & Vista
 };
 
 int supported_system_version()
@@ -146,11 +146,10 @@ int supported_system_version()
         vd_printf("GetVersionEx() failed: %u", GetLastError());
         return 0;
     }
-    if (osvi.dwMajorVersion == 5 && osvi.dwMinorVersion == 1) {
-        return SYS_VER_WIN_XP;
-    } else if (osvi.dwMajorVersion == 6 && osvi.dwMinorVersion == 1 &&
-                               osvi.wProductType == VER_NT_WORKSTATION) {
-        return SYS_VER_WIN_7;
+    if (osvi.dwMajorVersion == 5 && (osvi.dwMinorVersion == 1 || osvi.dwMinorVersion == 2)) {
+        return SYS_VER_WIN_XP_CLASS;
+    } else if (osvi.dwMajorVersion == 6 && (osvi.dwMinorVersion == 0 || osvi.dwMinorVersion == 1)) {
+        return SYS_VER_WIN_7_CLASS;
     }
     return 0;
 }
@@ -535,9 +534,9 @@ bool VDService::execute()
             default:
                 if (wait_ret == WAIT_OBJECT_0 + _events_count - 1) {
                     vd_printf("Agent killed");
-                    if (_system_version == SYS_VER_WIN_XP) {
+                    if (_system_version == SYS_VER_WIN_XP_CLASS) {
                         restart_agent(false);
-                    } else if (_system_version == SYS_VER_WIN_7) {
+                    } else if (_system_version == SYS_VER_WIN_7_CLASS) {
                         kill_agent();
                     }
                 } else {
@@ -805,7 +804,7 @@ bool VDService::launch_agent()
     startup_info.cb = sizeof(startup_info);
     startup_info.lpDesktop = TEXT("Winsta0\\winlogon");
     ZeroMemory(&_agent_proc_info, sizeof(_agent_proc_info));
-    if (_system_version == SYS_VER_WIN_XP) {
+    if (_system_version == SYS_VER_WIN_XP_CLASS) {
         if (_session_id == 0) {
             ret = CreateProcess(_agent_path, _agent_path, NULL, NULL, FALSE, 0, NULL, NULL,
                                 &startup_info, &_agent_proc_info);
@@ -821,7 +820,7 @@ bool VDService::launch_agent()
                 Sleep(CREATE_PROC_INTERVAL_MS);
             }
         }
-    } else if (_system_version == SYS_VER_WIN_7) {
+    } else if (_system_version == SYS_VER_WIN_7_CLASS) {
         startup_info.lpDesktop = TEXT("Winsta0\\default");
         ret = create_process_as_user(_session_id, _agent_path, _agent_path, NULL, NULL, FALSE, 0,
                                      NULL, NULL, &startup_info, &_agent_proc_info);
