@@ -44,7 +44,7 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="..\common;$(SPICE_COMMON_DIR)"
+				AdditionalIncludeDirectories="..\common;$(SPICE_PROTOCOL_DIR)"
 				PreprocessorDefinitions="WIN32;_DEBUG;_CONSOLE,_WIN32_WINNT=0x0501"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
@@ -121,7 +121,7 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="..\common;$(SPICE_COMMON_DIR)"
+				AdditionalIncludeDirectories="..\common;$(SPICE_PROTOCOL_DIR)"
 				PreprocessorDefinitions="WIN32;_DEBUG;_CONSOLE,_WIN32_WINNT=0x0501"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
@@ -197,7 +197,7 @@
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
-				AdditionalIncludeDirectories="..\common;$(SPICE_COMMON_DIR)"
+				AdditionalIncludeDirectories="..\common;$(SPICE_PROTOCOL_DIR)"
 				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE,_WIN32_WINNT=0x0501"
 				RuntimeLibrary="0"
 				UsePrecompiledHeader="0"
@@ -274,7 +274,7 @@
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
-				AdditionalIncludeDirectories="..\common;$(SPICE_COMMON_DIR)"
+				AdditionalIncludeDirectories="..\common;$(SPICE_PROTOCOL_DIR)"
 				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE,_WIN32_WINNT=0x0501"
 				RuntimeLibrary="0"
 				UsePrecompiledHeader="0"

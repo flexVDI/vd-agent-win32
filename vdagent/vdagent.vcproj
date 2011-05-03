@@ -44,7 +44,7 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="..\common;&quot;$(SPICE_COMMON_DIR)&quot;;&quot;$(SPICE_LIBS)\include\CxImage&quot;"
+				AdditionalIncludeDirectories="..\common;$(SPICE_PROTOCOL_DIR);$(SPICE_LIBS)\include\CxImage"
 				PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS,_WIN32_WINNT=0x0501"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
@@ -122,7 +122,7 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="..\common;&quot;$(SPICE_COMMON_DIR)&quot;;&quot;$(SPICE_LIBS)\include\CxImage&quot;"
+				AdditionalIncludeDirectories="..\common;$(SPICE_PROTOCOL_DIR);$(SPICE_LIBS)\include\CxImage"
 				PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS,_WIN32_WINNT=0x0501"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
@@ -200,7 +200,7 @@
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
-				AdditionalIncludeDirectories="..\common;&quot;$(SPICE_COMMON_DIR)&quot;;&quot;$(SPICE_LIBS)\include\CxImage&quot;"
+				AdditionalIncludeDirectories="..\common;$(SPICE_PROTOCOL_DIR);$(SPICE_LIBS)\include\CxImage"
 				AdditionalUsingDirectories=""
 				PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS,_WIN32_WINNT=0x0501"
 				RuntimeLibrary="0"
@@ -279,7 +279,7 @@
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
-				AdditionalIncludeDirectories="..\common;&quot;$(SPICE_COMMON_DIR)&quot;;&quot;$(SPICE_LIBS)\include\CxImage&quot;"
+				AdditionalIncludeDirectories="..\common;$(SPICE_PROTOCOL_DIR);$(SPICE_LIBS)\include\CxImage"
 				AdditionalUsingDirectories=""
 				PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS,_WIN32_WINNT=0x0501"
 				RuntimeLibrary="0"
