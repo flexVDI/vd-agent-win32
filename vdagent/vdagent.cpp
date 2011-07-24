@@ -565,11 +565,11 @@ bool VDAgent::handle_clipboard(VDAgentClipboard* clipboard, uint32_t size)
 
 HGLOBAL VDAgent::utf8_alloc(LPCSTR data, int size)
 {
-    HGLOBAL handle; 
+    HGLOBAL handle;
     LPVOID buf;
     int len;
 
-    // Received utf8 string is not null-terminated   
+    // Received utf8 string is not null-terminated
     if (!(len = MultiByteToWideChar(CP_UTF8, 0, data, size, NULL, 0))) {
         return NULL;
     }
@@ -581,7 +581,7 @@ HGLOBAL VDAgent::utf8_alloc(LPCSTR data, int size)
     if (!(buf = GlobalLock(handle))) {
         GlobalFree(handle);
         return NULL;
-    }  
+    }
     // Translate data and set clipboard content
     if (!(MultiByteToWideChar(CP_UTF8, 0, data, size, (LPWSTR)buf, len))) {
         GlobalUnlock(handle);
@@ -1027,7 +1027,7 @@ uint32_t VDAgent::get_clipboard_format(uint32_t type)
     for (int i = 0; i < clipboard_formats_count; i++) {
         for (uint32_t* ptype = clipboard_formats[i].types; *ptype; ptype++) {
             if (*ptype == type) {
-                return clipboard_formats[i].format; 
+                return clipboard_formats[i].format;
             }
         }
     }
