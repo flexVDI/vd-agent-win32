@@ -904,21 +904,24 @@ bool VDService::kill_agent()
 {
     DWORD exit_code = 0;
     DWORD wait_ret;
+    HANDLE proc_handle;
     bool ret = true;
 
     if (!_agent_alive) {
         return true;
     }
     _agent_alive = false;
+    proc_handle = _agent_proc_info.hProcess;
+    _agent_proc_info.hProcess = 0;
     if (_pipe_connected) {
         _pipe_connected = false;
         DisconnectNamedPipe(_pipe_state.pipe);
     }
-    if (GetProcessId(_agent_proc_info.hProcess)) {
-        wait_ret = WaitForSingleObject(_agent_proc_info.hProcess, 3000);
+    if (GetProcessId(proc_handle)) {
+        wait_ret = WaitForSingleObject(proc_handle, 3000);
         switch (wait_ret) {
         case WAIT_OBJECT_0:
-            if (GetExitCodeProcess(_agent_proc_info.hProcess, &exit_code)) {
+            if (GetExitCodeProcess(proc_handle, &exit_code)) {
                 vd_printf("vdagent exit code %u", exit_code);
             } else if (exit_code == STILL_ACTIVE) {
                 vd_printf("Failed killing vdagent");
@@ -937,7 +940,7 @@ bool VDService::kill_agent()
             break;
         }
     }
-    CloseHandle(_agent_proc_info.hProcess);
+    CloseHandle(proc_handle);
     CloseHandle(_agent_proc_info.hThread);
     ZeroMemory(&_agent_proc_info, sizeof(_agent_proc_info));
     return ret;
