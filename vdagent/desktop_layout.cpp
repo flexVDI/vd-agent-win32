@@ -67,7 +67,7 @@ void DesktopLayout::get_displays()
         }
         size_t size = _displays.size();
         if (!wcsstr(dev_info.DeviceString, L"QXL")) {
-            display_id = size;
+            display_id = (DWORD)size;
         } else if (!get_qxl_device_id(dev_info.DeviceKey, &display_id)) {
             vd_printf("get_qxl_device_id failed %S", dev_info.DeviceKey);
             break;
