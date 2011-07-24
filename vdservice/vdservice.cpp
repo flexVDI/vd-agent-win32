@@ -21,6 +21,7 @@
 #include <userenv.h>
 #include <stdio.h>
 #include <tlhelp32.h>
+#include <queue>
 #include "vdcommon.h"
 #include "virtio_vdi_port.h"
 #include "pci_vdi_port.h"
@@ -52,9 +53,17 @@ enum {
     VD_EVENT_PIPE_READ = 0,
     VD_EVENT_PIPE_WRITE,
     VD_EVENT_CONTROL,
-    VD_EVENT_LOGON,
     VD_STATIC_EVENTS_COUNT // Must be last
 };
+
+enum {
+    VD_CONTROL_IDLE = 0,
+    VD_CONTROL_STOP,
+    VD_CONTROL_LOGON,
+    VD_CONTROL_RESTART_AGENT,
+};
+
+typedef std::queue<int> VDControlQueue;
 
 class VDService {
 public:
@@ -71,6 +80,8 @@ private:
     static DWORD WINAPI control_handler(DWORD control, DWORD event_type,
                                         LPVOID event_data, LPVOID context);
     static VOID WINAPI main(DWORD argc, TCHAR * argv[]);
+    void set_control_event(int control_command);
+    void handle_control_event();
     void pipe_write_completion();
     void write_agent_control(uint32_t type, uint32_t opaque);
     void read_pipe();
@@ -79,7 +90,6 @@ private:
     bool handle_agent_control(VDPipeMessage* msg);
     bool restart_agent(bool normal_restart);
     bool launch_agent();
-    void send_logon();
     bool kill_agent();
     unsigned fill_agent_event() {
         ASSERT(_events);
@@ -96,13 +106,14 @@ private:
     SERVICE_STATUS_HANDLE _status_handle;
     PROCESS_INFORMATION _agent_proc_info;
     HANDLE _control_event;
-    HANDLE _logon_event;
     HANDLE* _events;
     TCHAR _agent_path[MAX_PATH];
     VDIPort* _vdi_port;
     VDPipeState _pipe_state;
-    uint32_t _connection_id;
+    VDControlQueue _control_queue;
+    mutex_t _control_mutex;
     mutex_t _agent_mutex;
+    uint32_t _connection_id;
     DWORD _session_id;
     DWORD _chunk_port;
     DWORD _chunk_size;
@@ -180,15 +191,14 @@ VDService::VDService()
     _control_event = CreateEvent(NULL, FALSE, FALSE, NULL);
     _pipe_state.write.overlap.hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
     _pipe_state.read.overlap.hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
-    _logon_event = CreateEvent(NULL, FALSE, FALSE, NULL);
     _agent_path[0] = wchar_t('\0');
     MUTEX_INIT(_agent_mutex);
+    MUTEX_INIT(_control_mutex);
     _singleton = this;
 }
 
 VDService::~VDService()
 {
-    CloseHandle(_logon_event);
     CloseHandle(_pipe_state.read.overlap.hEvent);
     CloseHandle(_pipe_state.write.overlap.hEvent);
     CloseHandle(_control_event);
@@ -293,6 +303,41 @@ const char* session_events[] = {
     "LOCK", "UNLOCK", "REMOTE_CONTROL"
 };
 
+void VDService::set_control_event(int control_command)
+{
+    MUTEX_LOCK(_control_mutex);
+    _control_queue.push(control_command);
+    if (_control_event && !SetEvent(_control_event)) {
+        vd_printf("SetEvent() failed: %u", GetLastError());
+    }
+    MUTEX_UNLOCK(_control_mutex);
+}
+
+void VDService::handle_control_event()
+{
+    MUTEX_LOCK(_control_mutex);
+    while (_control_queue.size()) {
+        int control_command = _control_queue.front();
+        _control_queue.pop();
+        vd_printf("Control command %d", control_command);
+        switch (control_command) {
+        case VD_CONTROL_STOP:
+            _running = false;
+            break;
+        case VD_CONTROL_LOGON:
+            write_agent_control(VD_AGENT_SESSION_LOGON, 0);
+            break;
+        case VD_CONTROL_RESTART_AGENT:
+            _running = restart_agent(true);
+            break;
+        default:
+            vd_printf("Unsupported control command %u", control_command);
+        }
+    }
+    MUTEX_UNLOCK(_control_mutex);
+
+}
+
 DWORD WINAPI VDService::control_handler(DWORD control, DWORD event_type, LPVOID event_data,
                                         LPVOID context)
 {
@@ -319,11 +364,9 @@ DWORD WINAPI VDService::control_handler(DWORD control, DWORD event_type, LPVOID 
         if (s->_system_version != SYS_VER_UNSUPPORTED) {
             if (event_type == WTS_CONSOLE_CONNECT) {
                 s->_session_id = session_id;
-                if (!s->restart_agent(true)) {
-                    s->stop();
-               }
+                s->set_control_event(VD_CONTROL_RESTART_AGENT);
             } else if (event_type == WTS_SESSION_LOGON) {
-                s->send_logon();
+                s->set_control_event(VD_CONTROL_LOGON);
             }
         }
         break;
@@ -471,7 +514,6 @@ bool VDService::execute()
     _events[VD_EVENT_PIPE_READ] = _pipe_state.read.overlap.hEvent;
     _events[VD_EVENT_PIPE_WRITE] = _pipe_state.write.overlap.hEvent;
     _events[VD_EVENT_CONTROL] = _control_event;
-    _events[VD_EVENT_LOGON] = _logon_event;
     _agent_proc_info.hProcess;
     _vdi_port->fill_events(&_events[_events_vdi_port_base]);
     _chunk_size = _chunk_port = 0;
@@ -523,11 +565,7 @@ bool VDService::execute()
                 pipe_write_completion();
                 break;
             case WAIT_OBJECT_0 + VD_EVENT_CONTROL:
-                vd_printf("Control event");
-                break;
-            case WAIT_OBJECT_0 + VD_EVENT_LOGON:
-                vd_printf("logon event");
-                write_agent_control(VD_AGENT_SESSION_LOGON, 0);
+                handle_control_event();
                 break;
             case WAIT_TIMEOUT:
                 break;
@@ -918,17 +956,7 @@ bool VDService::restart_agent(bool normal_restart)
 void VDService::stop()
 {
     vd_printf("Service stopped");
-    _running = false;
-    if (_control_event && !SetEvent(_control_event)) {
-        vd_printf("SetEvent() failed: %u", GetLastError());
-    }
-}
-
-void VDService::send_logon()
-{
-    if (_logon_event && !SetEvent(_logon_event)) {
-        vd_printf("SetEvent() failed: %u", GetLastError());
-    }
+    set_control_event(VD_CONTROL_STOP);
 }
 
 void VDService::pipe_write_completion()
@@ -1154,4 +1182,3 @@ int _tmain(int argc, TCHAR* argv[], TCHAR* envp[])
     delete vdservice;
     return (success ? 0 : -1);
 }
-
