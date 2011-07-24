@@ -80,6 +80,7 @@ private:
     static DWORD WINAPI control_handler(DWORD control, DWORD event_type,
                                         LPVOID event_data, LPVOID context);
     static VOID WINAPI main(DWORD argc, TCHAR * argv[]);
+    bool init_vdi_port();
     void set_control_event(int control_command);
     void handle_control_event();
     void pipe_write_completion();
@@ -454,6 +455,20 @@ VDIPort *create_pci_vdi_port()
     return new PCIVDIPort();
 }
 
+bool VDService::init_vdi_port()
+{
+    VDIPort* (*creators[])(void) = { create_virtio_vdi_port, create_pci_vdi_port };
+
+    for (int i = 0 ; i < sizeof(creators)/sizeof(creators[0]); ++i) {
+        _vdi_port = creators[i]();
+        if (_vdi_port->init()) {
+            return true;
+        }
+        delete _vdi_port;
+    }
+    return false;
+}
+
 bool VDService::execute()
 {
     SECURITY_ATTRIBUTES sec_attr;
@@ -488,19 +503,7 @@ bool VDService::execute()
         return false;
     }
 
-    bool init = false;
-    {
-        VDIPort* (*creators[])(void) = { create_virtio_vdi_port, create_pci_vdi_port };
-        for (int i = 0 ; i < sizeof(creators)/sizeof(creators[0]); ++i) {
-            _vdi_port = creators[i]();
-            init = _vdi_port->init();
-            if (init) {
-                break;
-            }
-            delete _vdi_port;
-        }
-    }
-    if (!init) {
+    if (!init_vdi_port()) {
         vd_printf("Failed to create VDIPort instance");
         CloseHandle(pipe);
         return false;
