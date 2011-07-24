@@ -836,6 +836,7 @@ BOOL create_process_as_user(IN DWORD session_id, IN LPCWSTR application_name,
 bool VDService::launch_agent()
 {
     STARTUPINFO startup_info;
+    OVERLAPPED overlap;
     BOOL ret = FALSE;
 
     ZeroMemory(&startup_info, sizeof(startup_info));
@@ -876,15 +877,27 @@ bool VDService::launch_agent()
         return false;
     }
     vd_printf("Wait for vdagent to connect");
-    if (ConnectNamedPipe(_pipe_state.pipe, NULL) || GetLastError() == ERROR_PIPE_CONNECTED) {
+    ZeroMemory(&overlap, sizeof(overlap));
+    overlap.hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
+    DWORD err = (ConnectNamedPipe(_pipe_state.pipe, &overlap) ? 0 : GetLastError());
+    if (err = ERROR_IO_PENDING) {
+        DWORD wait_ret = WaitForSingleObject(overlap.hEvent, 3000);
+        if (wait_ret != WAIT_OBJECT_0) {
+            vd_printf("WaitForSingleObject() failed: %u error: %u", wait_ret,
+                wait_ret == WAIT_FAILED ? GetLastError() : 0);
+            ret = FALSE;
+        }
+    } else if (err != 0 || err != ERROR_PIPE_CONNECTED) {
+        vd_printf("ConnectNamedPipe() failed: %u", err);
+        ret = FALSE;
+    }
+    if (ret) {
+        vd_printf("Pipe connected by vdagent");
         _pipe_connected = true;
         _pending_reset = false;
-        vd_printf("Pipe connected by vdagent");
-    } else {
-        vd_printf("ConnectNamedPipe() failed: %u", GetLastError());
-        return false;
     }
-    return true;
+    CloseHandle(overlap.hEvent);
+    return !!ret;
 }
 
 bool VDService::kill_agent()
