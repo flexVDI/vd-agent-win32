@@ -164,10 +164,16 @@ void VirtioVDIPort::read_completion()
 {
     DWORD bytes;
 
-    if (!GetOverlappedResult(_handle, &_read.overlap, &bytes, FALSE) &&
-                                      GetLastError() != ERROR_MORE_DATA) {
-        vd_printf("GetOverlappedResult failed: %u", GetLastError());
-        return;
+    if (!GetOverlappedResult(_handle, &_read.overlap, &bytes, FALSE)) {
+        DWORD err = GetLastError();
+
+        if (err == ERROR_OPERATION_ABORTED) {
+            _read.pending = false;
+            return;
+        } else if (err != ERROR_MORE_DATA) {
+            vd_printf("GetOverlappedResult failed: %u", err);
+            return;
+        }
     }
     _read.end = _read.ring + (_read.end - _read.ring + bytes) % BUF_SIZE;
     _read.bytes = bytes;
