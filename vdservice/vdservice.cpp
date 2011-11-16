@@ -34,7 +34,7 @@
 #define VD_SERVICE_LOG_PATH     TEXT("%svdservice.log")
 #define VD_SERVICE_LOAD_ORDER_GROUP TEXT("Pointer Port")
 #define VD_AGENT_PATH           TEXT("%s\\vdagent.exe")
-#define VD_AGENT_TIMEOUT        3000
+#define VD_AGENT_TIMEOUT        10000
 #define VD_AGENT_MAX_RESTARTS   10
 #define VD_AGENT_RESTART_INTERVAL 3000
 #define VD_AGENT_RESTART_COUNT_RESET_INTERVAL 60000
@@ -84,6 +84,7 @@ private:
     void set_control_event(int control_command);
     void handle_control_event();
     void pipe_write_completion();
+    void pipe_read_completion();
     void write_agent_control(uint32_t type, uint32_t opaque);
     void read_pipe();
     void handle_pipe_data(DWORD bytes);
@@ -336,7 +337,6 @@ void VDService::handle_control_event()
         }
     }
     MUTEX_UNLOCK(_control_mutex);
-
 }
 
 DWORD WINAPI VDService::control_handler(DWORD control, DWORD event_type, LPVOID event_data,
@@ -517,7 +517,6 @@ bool VDService::execute()
     _events[VD_EVENT_PIPE_READ] = _pipe_state.read.overlap.hEvent;
     _events[VD_EVENT_PIPE_WRITE] = _pipe_state.write.overlap.hEvent;
     _events[VD_EVENT_CONTROL] = _control_event;
-    _agent_proc_info.hProcess;
     _vdi_port->fill_events(&_events[_events_vdi_port_base]);
     _chunk_size = _chunk_port = 0;
     read_pipe();
@@ -548,22 +547,9 @@ bool VDService::execute()
             DWORD wait_ret = WaitForMultipleObjects(actual_events, _events, FALSE,
                                                               cont ? 0 : INFINITE);
             switch (wait_ret) {
-            case WAIT_OBJECT_0 + VD_EVENT_PIPE_READ: {
-                DWORD bytes = 0;
-                if (_pipe_connected && _pending_read) {
-                    _pending_read = false;
-                    if (GetOverlappedResult(_pipe_state.pipe, &_pipe_state.read.overlap,
-                                            &bytes, FALSE) || GetLastError() == ERROR_MORE_DATA) {
-                        handle_pipe_data(bytes);
-                        read_pipe();
-                    } else if (GetLastError() != ERROR_IO_INCOMPLETE) {
-                        vd_printf("GetOverlappedResult failed %u", GetLastError());
-                        _pipe_connected = false;
-                        DisconnectNamedPipe(_pipe_state.pipe);
-                    }
-                }
+            case WAIT_OBJECT_0 + VD_EVENT_PIPE_READ:
+                pipe_read_completion();
                 break;
-            }
             case WAIT_OBJECT_0 + VD_EVENT_PIPE_WRITE:
                 pipe_write_completion();
                 break;
@@ -884,13 +870,15 @@ bool VDService::launch_agent()
     overlap.hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
     DWORD err = (ConnectNamedPipe(_pipe_state.pipe, &overlap) ? 0 : GetLastError());
     if (err = ERROR_IO_PENDING) {
-        DWORD wait_ret = WaitForSingleObject(overlap.hEvent, 3000);
+        HANDLE wait_handles[2] = {overlap.hEvent, _agent_proc_info.hProcess};
+        DWORD wait_ret = WaitForMultipleObjects(2, wait_handles, FALSE, VD_AGENT_TIMEOUT);
         if (wait_ret != WAIT_OBJECT_0) {
-            vd_printf("WaitForSingleObject() failed: %u error: %u", wait_ret,
+            _agent_proc_info.hProcess = 0;
+            vd_printf("Failed waiting for vdagent connection: %u error: %u", wait_ret,
                 wait_ret == WAIT_FAILED ? GetLastError() : 0);
             ret = FALSE;
         }
-    } else if (err != 0 || err != ERROR_PIPE_CONNECTED) {
+    } else if (err != 0 && err != ERROR_PIPE_CONNECTED) {
         vd_printf("ConnectNamedPipe() failed: %u", err);
         ret = FALSE;
     }
@@ -921,14 +909,12 @@ bool VDService::kill_agent()
         DisconnectNamedPipe(_pipe_state.pipe);
     }
     if (GetProcessId(proc_handle)) {
-        wait_ret = WaitForSingleObject(proc_handle, 3000);
+        wait_ret = WaitForSingleObject(proc_handle, VD_AGENT_TIMEOUT);
         switch (wait_ret) {
         case WAIT_OBJECT_0:
             if (GetExitCodeProcess(proc_handle, &exit_code)) {
                 vd_printf("vdagent exit code %u", exit_code);
-            } else if (exit_code == STILL_ACTIVE) {
-                vd_printf("Failed killing vdagent");
-                ret = false;
+                ret = (exit_code != STILL_ACTIVE);
             } else {
                 vd_printf("GetExitCodeProcess() failed: %u", GetLastError());
             }
@@ -1005,13 +991,40 @@ void VDService::pipe_write_completion()
         _pending_write = true;
         if (!WriteFile(ps->pipe, ps->write.data + ps->write.start,
                        ps->write.end - ps->write.start, NULL, &_pipe_state.write.overlap)) {
-            vd_printf("WriteFile() failed: %u", GetLastError());
+            vd_printf("vdagent disconnected (%u)", GetLastError());
             _pending_write = false;
             _pipe_connected = false;
             DisconnectNamedPipe(_pipe_state.pipe);
         }
     } else {
         _pending_write = false;
+    }
+}
+
+void VDService::pipe_read_completion()
+{
+    DWORD bytes = 0;
+    DWORD err = ERROR_SUCCESS;
+
+    if (!_pipe_connected || !_pending_read) {
+        return;
+    }
+    _pending_read = false;
+    if (!GetOverlappedResult(_pipe_state.pipe, &_pipe_state.read.overlap, &bytes, FALSE)) {
+        err = GetLastError();
+    }
+    switch (err) {
+    case ERROR_SUCCESS:
+    case ERROR_MORE_DATA:
+        handle_pipe_data(bytes);
+        read_pipe();
+        break;
+    case ERROR_IO_INCOMPLETE:
+        break;
+    default:
+        vd_printf("vdagent disconnected (%u)", err);
+        _pipe_connected = false;
+        DisconnectNamedPipe(_pipe_state.pipe);
     }
 }
 
@@ -1025,11 +1038,10 @@ void VDService::read_pipe()
         if (ReadFile(ps->pipe, ps->read.data + ps->read.end, sizeof(ps->read.data) - ps->read.end,
                      &bytes, &ps->read.overlap) || GetLastError() == ERROR_MORE_DATA) {
             _pending_read = false;
-            vd_printf("ReadFile without pending %u", bytes);
             handle_pipe_data(bytes);
             read_pipe();
         } else if (GetLastError() != ERROR_IO_PENDING) {
-            vd_printf("ReadFile() failed: %u", GetLastError());
+            vd_printf("vdagent disconnected (%u)", GetLastError());
             _pending_read = false;
             _pipe_connected = false;
             DisconnectNamedPipe(_pipe_state.pipe);
