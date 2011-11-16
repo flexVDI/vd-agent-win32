@@ -20,6 +20,7 @@
 #include "display_setting.h"
 #include "ximage.h"
 #include <lmcons.h>
+#include <queue>
 #include <set>
 
 #define VD_AGENT_LOG_PATH       TEXT("%svdagent.log")
@@ -88,6 +89,9 @@ private:
     DWORD get_cximage_format(uint32_t type);
     enum { owner_none, owner_guest, owner_client };
     void set_clipboard_owner(int new_owner);
+    enum { CONTROL_STOP, CONTROL_DESKTOP_SWITCH };
+    void set_control_event(int control_command);
+    void handle_control_event();
     uint8_t* write_lock(DWORD bytes = 0);
     void write_unlock(DWORD bytes = 0);
     bool write_message(uint32_t type, uint32_t size, void* data);
@@ -109,7 +113,7 @@ private:
     LONG _mouse_y;
     INPUT _input;
     DWORD _input_time;
-    HANDLE _desktop_switch_event;
+    HANDLE _control_event;
     HANDLE _clipboard_event;
     VDAgentMessage* _in_msg;
     uint32_t _in_msg_pos;
@@ -119,10 +123,13 @@ private:
     bool _pending_input;
     bool _pending_write;
     bool _running;
+    bool _desktop_switch;
     DesktopLayout* _desktop_layout;
     DisplaySetting _display_setting;
     VDPipeState _pipe_state;
     mutex_t _write_mutex;
+    mutex_t _control_mutex;
+    std::queue<int> _control_queue;
 
     bool _logon_desktop;
     bool _display_setting_initialized;
@@ -154,7 +161,7 @@ VDAgent::VDAgent()
     , _mouse_x (0)
     , _mouse_y (0)
     , _input_time (0)
-    , _desktop_switch_event (NULL)
+    , _control_event (NULL)
     , _clipboard_event (NULL)
     , _in_msg (NULL)
     , _in_msg_pos (0)
@@ -164,6 +171,7 @@ VDAgent::VDAgent()
     , _pending_input (false)
     , _pending_write (false)
     , _running (false)
+    , _desktop_switch (false)
     , _desktop_layout (NULL)
     , _display_setting (VD_AGENT_REGISTRY_KEY)
     , _logon_desktop (false)
@@ -182,6 +190,7 @@ VDAgent::VDAgent()
     ZeroMemory(&_input, sizeof(INPUT));
     ZeroMemory(&_pipe_state, sizeof(VDPipeState));
     MUTEX_INIT(_write_mutex);
+    MUTEX_INIT(_control_mutex);
 
     _singleton = this;
 }
@@ -203,7 +212,7 @@ DWORD WINAPI VDAgent::event_thread_proc(LPVOID param)
         DWORD wait_ret = WaitForSingleObject(desktop_event, INFINITE);
         switch (wait_ret) {
         case WAIT_OBJECT_0:
-            SetEvent((HANDLE)param);
+            _singleton->set_control_event(CONTROL_DESKTOP_SWITCH);
             break;
         case WAIT_TIMEOUT:
         default:
@@ -233,9 +242,9 @@ bool VDAgent::run()
     if (!SetProcessShutdownParameters(0x100, 0)) {
         vd_printf("SetProcessShutdownParameters failed %u", GetLastError());
     }
-    _desktop_switch_event = CreateEvent(NULL, FALSE, FALSE, NULL);
+    _control_event = CreateEvent(NULL, FALSE, FALSE, NULL);
     _clipboard_event = CreateEvent(NULL, FALSE, FALSE, NULL);
-    if (!_desktop_switch_event || !_clipboard_event) {
+    if (!_control_event || !_clipboard_event) {
         vd_printf("CreateEvent() failed: %d", GetLastError());
         cleanup();
         return false;
@@ -257,8 +266,7 @@ bool VDAgent::run()
         return false;
     }
     _running = true;
-    event_thread = CreateThread(NULL, 0, event_thread_proc, _desktop_switch_event, 0,
-        &event_thread_id);
+    event_thread = CreateThread(NULL, 0, event_thread_proc, NULL, 0, &event_thread_id);
     if (!event_thread) {
         vd_printf("CreateThread() failed: %d", GetLastError());
         cleanup();
@@ -268,6 +276,9 @@ bool VDAgent::run()
     read_completion(0, 0, &_pipe_state.read.overlap);
     while (_running) {
         input_desktop_message_loop();
+        if (_clipboard_owner == owner_guest) {
+            set_clipboard_owner(owner_none);
+        }
     }
     vd_printf("Agent stopped");
     CloseHandle(event_thread);
@@ -277,15 +288,45 @@ bool VDAgent::run()
 
 void VDAgent::cleanup()
 {
-    CloseHandle(_desktop_switch_event);
+    CloseHandle(_control_event);
     CloseHandle(_clipboard_event);
     CloseHandle(_pipe_state.pipe);
     delete _desktop_layout;
 }
 
+void VDAgent::set_control_event(int control_command)
+{
+    MUTEX_LOCK(_control_mutex);
+    _control_queue.push(control_command);
+    if (_control_event && !SetEvent(_control_event)) {
+        vd_printf("SetEvent() failed: %u", GetLastError());
+    }
+    MUTEX_UNLOCK(_control_mutex);
+}
+
+void VDAgent::handle_control_event()
+{
+    MUTEX_LOCK(_control_mutex);
+    while (_control_queue.size()) {
+        int control_command = _control_queue.front();
+        _control_queue.pop();
+        vd_printf("Control command %d", control_command);
+        switch (control_command) {
+        case CONTROL_STOP:
+            _running = false;
+            break;
+        case CONTROL_DESKTOP_SWITCH:
+            _desktop_switch = true;
+            break;
+        default:
+            vd_printf("Unsupported control command %u", control_command);
+        }
+    }
+    MUTEX_UNLOCK(_control_mutex);
+}
+
 void VDAgent::input_desktop_message_loop()
 {
-    bool desktop_switch = false;
     TCHAR desktop_name[MAX_PATH];
     DWORD wait_ret;
     HDESK hdesk;
@@ -333,13 +374,12 @@ void VDAgent::input_desktop_message_loop()
         return;
     }
     _hwnd_next_viewer = SetClipboardViewer(_hwnd);
-    while (_running && !desktop_switch) {
-        wait_ret = MsgWaitForMultipleObjectsEx(1, &_desktop_switch_event, INFINITE, QS_ALLINPUT,
+    while (_running && !_desktop_switch) {
+        wait_ret = MsgWaitForMultipleObjectsEx(1, &_control_event, INFINITE, QS_ALLINPUT,
                                                MWMO_ALERTABLE);
         switch (wait_ret) {
         case WAIT_OBJECT_0:
-            vd_printf("WinSta0_DesktopSwitch");
-            desktop_switch = true;
+            handle_control_event();
             break;
         case WAIT_OBJECT_0 + 1:
             while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
@@ -354,6 +394,7 @@ void VDAgent::input_desktop_message_loop()
             vd_printf("MsgWaitForMultipleObjectsEx(): %u", wait_ret);
         }
     }
+    _desktop_switch = false;
     if (_pending_input) {
         KillTimer(_hwnd, VD_TIMER_ID);
         _pending_input = false;
@@ -901,7 +942,7 @@ bool VDAgent::handle_clipboard_grab(VDAgentClipboardGrab* clipboard_grab, uint32
 
     _grab_types.clear();
     for (uint32_t i = 0; i < size / sizeof(clipboard_grab->types[0]); i++) {
-        vd_printf("grab %u", clipboard_grab->types[i]);
+        vd_printf("grab type %u", clipboard_grab->types[i]);
         uint32_t format = get_clipboard_format(clipboard_grab->types[i]);
         //On first supported type, open and empty the clipboard
         if (format && grab_formats.empty()) {
@@ -1154,7 +1195,7 @@ VOID CALLBACK VDAgent::read_completion(DWORD err, DWORD bytes, LPOVERLAPPED over
         return;
     }
     if (err) {
-        vd_printf("error %u", err);
+        vd_printf("vdservice disconnected (%u)", err);
         a->_running = false;
         return;
     }
@@ -1225,7 +1266,7 @@ VOID CALLBACK VDAgent::write_completion(DWORD err, DWORD bytes, LPOVERLAPPED ove
         return;
     }
     if (err) {
-        vd_printf("error %u", err);
+        vd_printf("vdservice disconnected (%u)", err);
         a->_running = false;
         return;
     }
@@ -1297,11 +1338,14 @@ LRESULT CALLBACK VDAgent::wnd_proc(HWND hwnd, UINT message, WPARAM wparam, LPARA
     case WM_RENDERFORMAT:
         a->on_clipboard_request((UINT)wparam);
         break;
-    case WM_RENDERALLFORMATS:
-        vd_printf("WM_RENDERALLFORMATS");
-        break;
-    case WM_DESTROYCLIPBOARD:
-        vd_printf("WM_DESTROYCLIPBOARD");
+    case WM_ENDSESSION:
+        if (wparam) {
+            vd_printf("Session ended");
+            if (a->_clipboard_owner == owner_guest) {
+                a->set_clipboard_owner(owner_none);
+            }
+            a->set_control_event(CONTROL_STOP);
+        }
         break;
     default:
         return DefWindowProc(hwnd, message, wparam, lparam);
