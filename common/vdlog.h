@@ -22,8 +22,8 @@
 #include <tchar.h>
 #include <crtdbg.h>
 #include <windows.h>
-
-#define LOG_ENABLED
+#include <time.h>
+#include <sys/timeb.h>
 
 class VDLog {
 public:
@@ -39,22 +39,54 @@ private:
     FILE* _handle;
 };
 
-#ifdef LOG_ENABLED
-#define vd_printf(format, ...) {                                                    \
-    VDLog* log = VDLog::get();                                                      \
-    double secs = GetTickCount() / 1000.0;                                          \
-    if (log) {                                                                      \
-        log->printf("%.3f %s: " format "\n", secs, __FUNCTION__, __VA_ARGS__);      \
-    } else {                                                                        \
-        printf("%.3f %s: " format "\n", secs, __FUNCTION__, __VA_ARGS__);           \
-    }                                                                               \
+enum {
+  LOG_DEBUG,
+  LOG_INFO,
+  LOG_WARN,
+  LOG_ERROR,
+  LOG_FATAL
+};
+
+#ifdef _DEBUG
+static unsigned int log_level = LOG_DEBUG;
+#else
+static unsigned int log_level = LOG_INFO;
+#endif
+
+#define PRINT_LINE(type, format, datetime, ms, ...)                                             \
+    printf("%u::%s::%s,%.3d::%s::" format "\n", GetCurrentThreadId(), type, datetime, ms,       \
+           __FUNCTION__, ## __VA_ARGS__);
+
+#define LOG(type, format, ...) if (type >= log_level && type <= LOG_FATAL) {                    \
+    VDLog* log = VDLog::get();                                                                  \
+    const char *type_as_char[] = { "DEBUG", "INFO", "WARN", "ERROR", "FATAL" };                 \
+    struct _timeb now;                                                                          \
+    struct tm today;                                                                            \
+    char datetime_str[20];                                                                      \
+    _ftime_s(&now);                                                                             \
+    localtime_s(&today, &now.time);                                                             \
+    strftime(datetime_str, 20, "%Y-%m-%d %H:%M:%S", &today);                                    \
+    if (log) {                                                                                  \
+        log->PRINT_LINE(type_as_char[type], format, datetime_str, now.millitm, ## __VA_ARGS__); \
+    } else {                                                                                    \
+        PRINT_LINE(type_as_char[type], format, datetime_str, now.millitm, ## __VA_ARGS__);      \
+    }                                                                                           \
+}
+ 
+#define vd_printf(format, ...) LOG(LOG_INFO, format, ## __VA_ARGS__)
+#define LOG_INFO(format, ...) LOG(LOG_INFO, format, ## __VA_ARGS__)
+#define LOG_WARN(format, ...) LOG(LOG_WARN, format, ## __VA_ARGS__)
+#define LOG_ERROR(format, ...) LOG(LOG_ERROR, format, ## __VA_ARGS__)
+
+#define DBGLEVEL 1000
+
+#define DBG(level, format, ...) {               \
+    if (level <= DBGLEVEL) {                    \
+        LOG(LOG_DEBUG, format, ## __VA_ARGS__); \
+    }                                           \
 }
 
 #define ASSERT(x) _ASSERTE(x)
-#else
-#define vd_printf(format, ...)
-#define ASSERT(x)
-#endif
 
 void log_version();
 

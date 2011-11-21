@@ -40,7 +40,6 @@ VDLog::~VDLog()
 
 VDLog* VDLog::get(TCHAR* path)
 {
-#ifdef LOG_ENABLED
     if (_log || !path) {
         return _log;
     }
@@ -64,9 +63,6 @@ VDLog* VDLog::get(TCHAR* path)
     }
     _log = new VDLog(handle);
     return _log;
-#else
-    return NULL;
-#endif
 }
 
 void VDLog::printf(const char* format, ...)
