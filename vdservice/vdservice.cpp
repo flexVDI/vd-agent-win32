@@ -443,6 +443,7 @@ VOID WINAPI VDService::main(DWORD argc, TCHAR* argv[])
 #ifndef DEBUG_VDSERVICE
     SetServiceStatus(s->_status_handle, status);
 #endif //DEBUG_VDSERVICE
+    vd_printf("***Service stopped***");
 }
 
 VDIPort *create_virtio_vdi_port()
@@ -466,6 +467,7 @@ bool VDService::init_vdi_port()
         }
         delete _vdi_port;
     }
+    _vdi_port = NULL;
     return false;
 }
 
@@ -474,6 +476,9 @@ bool VDService::execute()
     SECURITY_ATTRIBUTES sec_attr;
     SECURITY_DESCRIPTOR* sec_desr;
     HANDLE pipe;
+    INT* con_state = NULL;
+    bool con_state_active = false;
+    DWORD bytes;
 
     sec_desr = (SECURITY_DESCRIPTOR*)LocalAlloc(LPTR, SECURITY_DESCRIPTOR_MIN_LENGTH);
     InitializeSecurityDescriptor(sec_desr, SECURITY_DESCRIPTOR_REVISION);
@@ -495,16 +500,35 @@ bool VDService::execute()
     _session_id = WTSGetActiveConsoleSessionId();
     if (_session_id == 0xFFFFFFFF) {
         vd_printf("WTSGetActiveConsoleSessionId() failed");
-        CloseHandle(pipe);
-        return false;
+        _running = false;
     }
-    if (!launch_agent()) {
-        CloseHandle(pipe);
-        return false;
+    vd_printf("Active console session id: %u", _session_id);
+    if (WTSQuerySessionInformation(WTS_CURRENT_SERVER_HANDLE, _session_id,
+                                   WTSConnectState, (LPTSTR *)&con_state, &bytes)) {
+        vd_printf("Connect state: %d", *con_state);
+        con_state_active = (*con_state == WTSActive);
+        WTSFreeMemory(con_state);
     }
-
-    if (!init_vdi_port()) {
+    if (_running && !launch_agent()) {
+        // In case of agent launch failure: if connection state is not active(*), wait for agent
+        // launch on the next session connection. Otherwise, the service is stopped.
+        // (*) The failure was due to system startup timings and logon settings, causing the first
+        // agent instance lifetime (before session connect) to be too short to connect the service.
+        _running = !con_state_active && (GetLastError() != ERROR_FILE_NOT_FOUND);
+        if (_running) {
+            vd_printf("Failed launching vdagent instance, waiting for session connection");
+        }
+        while (_running && !_pipe_connected) {
+            if (WaitForSingleObject(_control_event, INFINITE) == WAIT_OBJECT_0) {
+                handle_control_event();
+            }
+        }
+    }
+    if (_running && !init_vdi_port()) {
         vd_printf("Failed to create VDIPort instance");
+        _running = false;
+    }
+    if (!_running) {
         CloseHandle(pipe);
         return false;
     }
@@ -952,7 +976,9 @@ bool VDService::restart_agent(bool normal_restart)
         }
         _last_agent_restart_time = time;
         ret = true;
-        read_pipe();
+        if (_vdi_port) {
+            read_pipe();
+        }
     }
     MUTEX_UNLOCK(_agent_mutex);
     return ret;
