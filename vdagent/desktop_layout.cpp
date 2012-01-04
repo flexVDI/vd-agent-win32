@@ -44,10 +44,6 @@ void DesktopLayout::get_displays()
     DEVMODE mode;
     DWORD display_id;
     DWORD dev_id = 0;
-    LONG min_x = 0;
-    LONG min_y = 0;
-    LONG max_x = 0;
-    LONG max_y = 0;
     bool attached;
 
     lock();
@@ -81,22 +77,10 @@ void DesktopLayout::get_displays()
         attached = !!(dev_info.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP);
         EnumDisplaySettings(dev_info.DeviceName, ENUM_CURRENT_SETTINGS, &mode);
         _displays[display_id] = new DisplayMode(mode.dmPosition.x, mode.dmPosition.y,
-                                            mode.dmPelsWidth, mode.dmPelsHeight,
-                                            mode.dmBitsPerPel, attached);
-        if (attached) {
-            min_x = min(min_x, mode.dmPosition.x);
-            min_y = min(min_y, mode.dmPosition.y);
-            max_x = max(max_x, mode.dmPosition.x + (LONG)mode.dmPelsWidth);
-            max_y = max(max_y, mode.dmPosition.y + (LONG)mode.dmPelsHeight);
-        }
+                                                mode.dmPelsWidth, mode.dmPelsHeight,
+                                                mode.dmBitsPerPel, attached);
     }
-    if (min_x || min_y) {
-        for (Displays::iterator iter = _displays.begin(); iter != _displays.end(); iter++) {
-            (*iter)->move_pos(-min_x, -min_y);
-        }
-    }
-    _total_width = max_x - min_x;
-    _total_height = max_y - min_y;
+    normalize_displays_pos();
     unlock();
 }
 
@@ -147,8 +131,38 @@ void DesktopLayout::set_displays()
     }
     if (dev_sets) {
         ChangeDisplaySettingsEx(NULL, NULL, NULL, 0, NULL);
+        normalize_displays_pos();
     }
     unlock();
+}
+
+// Normalize all display positions to non-negative coordinates and update total width and height of
+// the virtual desktop. Caller is responsible to lock() & unlock().
+void DesktopLayout::normalize_displays_pos()
+{
+    Displays::iterator iter;
+    DisplayMode* mode;
+    LONG min_x = 0;
+    LONG min_y = 0;
+    LONG max_x = 0;
+    LONG max_y = 0;
+
+    for (iter = _displays.begin(); iter != _displays.end(); iter++) {
+        mode = *iter;
+        if (mode->_attached) {
+            min_x = min(min_x, mode->_pos_x);
+            min_y = min(min_y, mode->_pos_y);
+            max_x = max(max_x, mode->_pos_x + (LONG)mode->_width);
+            max_y = max(max_y, mode->_pos_y + (LONG)mode->_height);
+        }
+    }
+    if (min_x || min_y) {
+        for (iter = _displays.begin(); iter != _displays.end(); iter++) {
+            (*iter)->move_pos(-min_x, -min_y);
+        }
+    }
+    _total_width = max_x - min_x;
+    _total_height = max_y - min_y;
 }
 
 bool DesktopLayout::consistent_displays()
