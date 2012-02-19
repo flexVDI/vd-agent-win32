@@ -24,9 +24,12 @@
 #define METHOD_BUFFERED     0
 #define FILE_ANY_ACCESS     0
 
+#ifndef CTL_CODE
+//With mingw, this is defined in winioctl.h
 #define CTL_CODE(DeviceType, Function, Method, Access) (                   \
     ((DeviceType) << 16) | ((Access) << 14) | ((Function) << 2) | (Method) \
 )
+#endif
 
 #define FIRST_AVAIL_IO_FUNC 0x800
 #define RED_TUNNEL_CTL_FUNC FIRST_AVAIL_IO_FUNC
