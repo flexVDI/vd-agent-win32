@@ -296,7 +296,9 @@ typedef unsigned long long   uintmax_t;
 
 
 
+#ifndef SIZE_MAX
 #define SIZE_MAX UINT32_MAX
+#endif
 
 
 
