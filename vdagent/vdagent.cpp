@@ -111,8 +111,8 @@ private:
     HWND _hwnd_next_viewer;
     int _clipboard_owner;
     DWORD _buttons_state;
-    LONG _mouse_x;
-    LONG _mouse_y;
+    ULONG _mouse_x;
+    ULONG _mouse_y;
     INPUT _input;
     DWORD _input_time;
     HANDLE _control_event;
