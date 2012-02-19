@@ -16,7 +16,7 @@
 */
 #include <windows.h>
 #include <stdio.h>
-#include <Sddl.h>
+#include <sddl.h>
 #include <string.h>
 #include <tlhelp32.h>
 #include "display_setting.h"
