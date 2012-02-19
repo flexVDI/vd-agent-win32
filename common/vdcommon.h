@@ -18,7 +18,9 @@
 #ifndef _H_VDCOMMON
 #define _H_VDCOMMON
 
+#if !defined __GNUC__
 #pragma warning(disable:4200)
+#endif
 
 #include <windows.h>
 #include "spice/vd_agent.h"
