@@ -18,6 +18,11 @@
 #include "desktop_layout.h"
 #include "vdlog.h"
 
+#ifdef __MINGW32__
+using std::min;
+using std::max;
+#endif
+
 void DisplayMode::set_res(DWORD width, DWORD height, DWORD depth)
 {
     _width = width;
