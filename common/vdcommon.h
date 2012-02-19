@@ -45,12 +45,20 @@ enum {
     VD_AGENT_SESSION_LOGON,
 };
 
-typedef __declspec (align(1)) struct VDPipeMessage {
+#if defined __GNUC__
+#define ALIGN_GCC __attribute__ ((packed))
+#define ALIGN_VC
+#else
+#define ALIGN_GCC
+#define ALIGN_VC __declspec (align(1))
+#endif
+
+typedef struct ALIGN_VC VDPipeMessage {
     uint32_t type;
     uint32_t opaque;
     uint32_t size;
     uint8_t data[0];
-} VDPipeMessage;
+} ALIGN_GCC VDPipeMessage;
 
 typedef struct VDPipeBuffer {
     OVERLAPPED overlap;
