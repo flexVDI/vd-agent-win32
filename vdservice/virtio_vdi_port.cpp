@@ -69,7 +69,7 @@ bool VirtioVDIPort::init()
     _handle = CreateFile(VIOSERIAL_PORT_PATH, GENERIC_READ | GENERIC_WRITE , 0, NULL,
                          OPEN_EXISTING, FILE_FLAG_OVERLAPPED, NULL);
     if (_handle == INVALID_HANDLE_VALUE) {
-        vd_printf("CreateFile() %s failed: %lu", VIOSERIAL_PORT_PATH, GetLastError());
+        vd_printf("CreateFile() %ls failed: %lu", VIOSERIAL_PORT_PATH, GetLastError());
         return false;
     }
     _write.overlap.hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
