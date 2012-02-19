@@ -69,17 +69,17 @@ bool VirtioVDIPort::init()
     _handle = CreateFile(VIOSERIAL_PORT_PATH, GENERIC_READ | GENERIC_WRITE , 0, NULL,
                          OPEN_EXISTING, FILE_FLAG_OVERLAPPED, NULL);
     if (_handle == INVALID_HANDLE_VALUE) {
-        vd_printf("CreateFile() %s failed: %u", VIOSERIAL_PORT_PATH, GetLastError());
+        vd_printf("CreateFile() %s failed: %lu", VIOSERIAL_PORT_PATH, GetLastError());
         return false;
     }
     _write.overlap.hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
     if (_write.overlap.hEvent == NULL) {
-        vd_printf("CreateEvent() failed: %u", GetLastError());
+        vd_printf("CreateEvent() failed: %lu", GetLastError());
         return false;
     }
     _read.overlap.hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
     if (_read.overlap.hEvent == NULL) {
-        vd_printf("CreateEvent() failed: %u", GetLastError());
+        vd_printf("CreateEvent() failed: %lu", GetLastError());
         return false;
     }
     return true;
@@ -121,7 +121,7 @@ void VirtioVDIPort::write_completion()
         return;
     }
     if (!GetOverlappedResult(_handle, &_write.overlap, &bytes, FALSE)) {
-        vd_printf("GetOverlappedResult failed: %u", GetLastError());
+        vd_printf("GetOverlappedResult failed: %lu", GetLastError());
         return;
     }
     _write.start = _write.ring + (_write.start - _write.ring + bytes) % BUF_SIZE;
@@ -171,7 +171,7 @@ void VirtioVDIPort::read_completion()
             _read.pending = false;
             return;
         } else if (err != ERROR_MORE_DATA) {
-            vd_printf("GetOverlappedResult failed: %u", err);
+            vd_printf("GetOverlappedResult failed: %lu", err);
             return;
         }
     }

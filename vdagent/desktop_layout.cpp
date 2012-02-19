@@ -112,14 +112,14 @@ void DesktopLayout::set_displays()
             break;
         }
         if (display_id >= _displays.size()) {
-            vd_printf("display_id %u out of range, #displays %u", display_id, _displays.size());
+            vd_printf("display_id %lu out of range, #displays %u", display_id, _displays.size());
             break;
         }
         if (!init_dev_mode(dev_info.DeviceName, &dev_mode, _displays.at(display_id), true)) {
             vd_printf("No suitable mode found for display %S", dev_info.DeviceName);
             break;
         }
-        vd_printf("Set display mode %ux%u", dev_mode.dmPelsWidth, dev_mode.dmPelsHeight);
+        vd_printf("Set display mode %lux%lu", dev_mode.dmPelsWidth, dev_mode.dmPelsHeight);
         LONG ret = ChangeDisplaySettingsEx(dev_info.DeviceName, &dev_mode, NULL,
                                            CDS_UPDATEREGISTRY | CDS_NORESET, NULL);
         if (ret == DISP_CHANGE_SUCCESSFUL) {

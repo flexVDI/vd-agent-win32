@@ -99,7 +99,7 @@ void log_version()
                 size < sizeof(VS_FIXEDFILEINFO)) {
             throw;
         }
-        vd_printf("%d.%d.%d.%d",
+        vd_printf("%lu.%lu.%lu.%lu",
             file_info->dwFileVersionMS >> 16,
             file_info->dwFileVersionMS & 0x0ffff,
             file_info->dwFileVersionLS >> 16,

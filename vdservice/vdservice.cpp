@@ -156,7 +156,7 @@ int supported_system_version()
     ZeroMemory(&osvi, sizeof(OSVERSIONINFOEX));
     osvi.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEX);
     if (!GetVersionEx((OSVERSIONINFO*)&osvi)) {
-        vd_printf("GetVersionEx() failed: %u", GetLastError());
+        vd_printf("GetVersionEx() failed: %lu", GetLastError());
         return 0;
     }
     if (osvi.dwMajorVersion == 5 && (osvi.dwMinorVersion == 1 || osvi.dwMinorVersion == 2)) {
@@ -252,7 +252,7 @@ bool VDService::install()
         printf("Service already exists\n");
         ret = true;
     } else {
-        printf("Service not installed successfully, error %d\n", GetLastError());
+        printf("Service not installed successfully, error %lu\n", GetLastError());
     }
     CloseServiceHandle(service_control_manager);
     return ret;
@@ -310,7 +310,7 @@ void VDService::set_control_event(int control_command)
     MUTEX_LOCK(_control_mutex);
     _control_queue.push(control_command);
     if (_control_event && !SetEvent(_control_event)) {
-        vd_printf("SetEvent() failed: %u", GetLastError());
+        vd_printf("SetEvent() failed: %lu", GetLastError());
     }
     MUTEX_UNLOCK(_control_mutex);
 }
@@ -360,7 +360,7 @@ DWORD WINAPI VDService::control_handler(DWORD control, DWORD event_type, LPVOID 
         break;
     case SERVICE_CONTROL_SESSIONCHANGE: {
         DWORD session_id = ((WTSSESSION_NOTIFICATION*)event_data)->dwSessionId;
-        vd_printf("Session %u %s", session_id, session_events[event_type]);
+        vd_printf("Session %lu %s", session_id, session_events[event_type]);
         SetServiceStatus(s->_status_handle, &s->_status);
         if (s->_system_version != SYS_VER_UNSUPPORTED) {
             if (event_type == WTS_CONSOLE_CONNECT) {
@@ -373,7 +373,7 @@ DWORD WINAPI VDService::control_handler(DWORD control, DWORD event_type, LPVOID 
         break;
     }
     default:
-        vd_printf("Unsupported control %u", control);
+        vd_printf("Unsupported control %lu", control);
         ret = ERROR_CALL_NOT_IMPLEMENTED;
     }
     return ret;
@@ -402,7 +402,7 @@ VOID WINAPI VDService::main(DWORD argc, TCHAR* argv[])
     vd_printf("***Service started***");
     log_version();
     if (!SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS)) {
-        vd_printf("SetPriorityClass failed %u", GetLastError());
+        vd_printf("SetPriorityClass failed %lu", GetLastError());
     }
     status = &s->_status;
     status->dwServiceType = SERVICE_WIN32;
@@ -493,7 +493,7 @@ bool VDService::execute()
                            VD_AGENT_TIMEOUT, &sec_attr);
     LocalFree(sec_desr);
     if (pipe == INVALID_HANDLE_VALUE) {
-        vd_printf("CreatePipe() failed: %u", GetLastError());
+        vd_printf("CreatePipe() failed: %lu", GetLastError());
         return false;
     }
     _pipe_state.pipe = pipe;
@@ -502,7 +502,7 @@ bool VDService::execute()
         vd_printf("WTSGetActiveConsoleSessionId() failed");
         _running = false;
     }
-    vd_printf("Active console session id: %u", _session_id);
+    vd_printf("Active console session id: %lu", _session_id);
     if (WTSQuerySessionInformation(WTS_CURRENT_SERVER_HANDLE, _session_id,
                                    WTSConnectState, (LPTSTR *)&con_state, &bytes)) {
         vd_printf("Connect state: %d", *con_state);
@@ -596,7 +596,7 @@ bool VDService::execute()
                                    _events_vdi_port_base + _vdi_port->get_num_events()) {
                         _vdi_port->handle_event(wait_ret - VD_STATIC_EVENTS_COUNT - WAIT_OBJECT_0);
                     } else {
-                        vd_printf("WaitForMultipleObjects failed %u", GetLastError());
+                        vd_printf("WaitForMultipleObjects failed %lu", GetLastError());
                     }
                 }
             }
@@ -796,13 +796,13 @@ BOOL create_process_as_user(IN DWORD session_id, IN LPCWSTR application_name,
 
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snap == INVALID_HANDLE_VALUE) {
-        vd_printf("CreateToolhelp32Snapshot() failed %u", GetLastError());
+        vd_printf("CreateToolhelp32Snapshot() failed %lu", GetLastError());
         return false;
     }
     ZeroMemory(&proc_entry, sizeof(proc_entry));
     proc_entry.dwSize = sizeof(PROCESSENTRY32);
     if (!Process32First(snap, &proc_entry)) {
-        vd_printf("Process32First() failed %u", GetLastError());
+        vd_printf("Process32First() failed %lu", GetLastError());
         CloseHandle(snap);
         return false;
     }
@@ -823,20 +823,20 @@ BOOL create_process_as_user(IN DWORD session_id, IN LPCWSTR application_name,
     }
     winlogon_proc = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, winlogon_pid);
     if (!winlogon_proc) {
-        vd_printf("OpenProcess() failed %u", GetLastError());
+        vd_printf("OpenProcess() failed %lu", GetLastError());
         return false;
     }
     ret = OpenProcessToken(winlogon_proc, TOKEN_DUPLICATE, &token);
     CloseHandle(winlogon_proc);
     if (!ret) {
-        vd_printf("OpenProcessToken() failed %u", GetLastError());
+        vd_printf("OpenProcessToken() failed %lu", GetLastError());
         return false;
     }
     ret = DuplicateTokenEx(token, MAXIMUM_ALLOWED, NULL, SecurityIdentification, TokenPrimary,
                            &token_dup);
     CloseHandle(token);
     if (!ret) {
-        vd_printf("DuplicateTokenEx() failed %u", GetLastError());
+        vd_printf("DuplicateTokenEx() failed %lu", GetLastError());
         return false;
     }
     ret = CreateProcessAsUser(token_dup, application_name, command_line, process_attributes,
@@ -881,7 +881,7 @@ bool VDService::launch_agent()
         return false;
     }
     if (!ret) {
-        vd_printf("CreateProcess() failed: %u", GetLastError());
+        vd_printf("CreateProcess() failed: %lu", GetLastError());
         return false;
     }
     _agent_alive = true;
@@ -898,12 +898,12 @@ bool VDService::launch_agent()
         DWORD wait_ret = WaitForMultipleObjects(2, wait_handles, FALSE, VD_AGENT_TIMEOUT);
         if (wait_ret != WAIT_OBJECT_0) {
             _agent_proc_info.hProcess = 0;
-            vd_printf("Failed waiting for vdagent connection: %u error: %u", wait_ret,
+            vd_printf("Failed waiting for vdagent connection: %lu error: %lu", wait_ret,
                 wait_ret == WAIT_FAILED ? GetLastError() : 0);
             ret = FALSE;
         }
     } else if (err != 0 && err != ERROR_PIPE_CONNECTED) {
-        vd_printf("ConnectNamedPipe() failed: %u", err);
+        vd_printf("ConnectNamedPipe() failed: %lu", err);
         ret = FALSE;
     }
     if (ret) {
@@ -937,10 +937,10 @@ bool VDService::kill_agent()
         switch (wait_ret) {
         case WAIT_OBJECT_0:
             if (GetExitCodeProcess(proc_handle, &exit_code)) {
-                vd_printf("vdagent exit code %u", exit_code);
+                vd_printf("vdagent exit code %lu", exit_code);
                 ret = (exit_code != STILL_ACTIVE);
             } else {
-                vd_printf("GetExitCodeProcess() failed: %u", GetLastError());
+                vd_printf("GetExitCodeProcess() failed: %lu", GetLastError());
             }
             break;
         case WAIT_TIMEOUT:
@@ -949,7 +949,7 @@ bool VDService::kill_agent()
             break;
         case WAIT_FAILED:
         default:
-            vd_printf("WaitForSingleObject() failed: %u", GetLastError());
+            vd_printf("WaitForSingleObject() failed: %lu", GetLastError());
             break;
         }
     }
@@ -1008,7 +1008,7 @@ void VDService::pipe_write_completion()
             vd_printf("Overlapped write is pending");
             return;
         } else {
-            vd_printf("GetOverlappedResult() failed : %d", GetLastError());
+            vd_printf("GetOverlappedResult() failed : %lu", GetLastError());
         }
         _pending_write = false;
     }
@@ -1017,7 +1017,7 @@ void VDService::pipe_write_completion()
         _pending_write = true;
         if (!WriteFile(ps->pipe, ps->write.data + ps->write.start,
                        ps->write.end - ps->write.start, NULL, &_pipe_state.write.overlap)) {
-            vd_printf("vdagent disconnected (%u)", GetLastError());
+            vd_printf("vdagent disconnected (%lu)", GetLastError());
             _pending_write = false;
             _pipe_connected = false;
             DisconnectNamedPipe(_pipe_state.pipe);
@@ -1048,7 +1048,7 @@ void VDService::pipe_read_completion()
     case ERROR_IO_INCOMPLETE:
         break;
     default:
-        vd_printf("vdagent disconnected (%u)", err);
+        vd_printf("vdagent disconnected (%lu)", err);
         _pipe_connected = false;
         DisconnectNamedPipe(_pipe_state.pipe);
     }
@@ -1067,7 +1067,7 @@ void VDService::read_pipe()
             handle_pipe_data(bytes);
             read_pipe();
         } else if (GetLastError() != ERROR_IO_PENDING) {
-            vd_printf("vdagent disconnected (%u)", GetLastError());
+            vd_printf("vdagent disconnected (%lu)", GetLastError());
             _pending_read = false;
             _pipe_connected = false;
             DisconnectNamedPipe(_pipe_state.pipe);

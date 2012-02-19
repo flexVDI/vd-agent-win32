@@ -62,17 +62,17 @@ bool PCIVDIPort::init()
     _handle = CreateFile(VDI_PORT_DEV_NAME, GENERIC_READ | GENERIC_WRITE, 0, NULL,
                          OPEN_EXISTING, 0, NULL);
     if (_handle == INVALID_HANDLE_VALUE) {
-        vd_printf("CreateFile() failed: %u", GetLastError());
+        vd_printf("CreateFile() failed: %lu", GetLastError());
         return false;
     }
     _event = CreateEvent(NULL, FALSE, FALSE, NULL);
     if (_event == NULL) {
-        vd_printf("CreateEvent() failed: %u", GetLastError());
+        vd_printf("CreateEvent() failed: %lu", GetLastError());
         return false;
     }
     if (!DeviceIoControl(_handle, IOCTL_RED_TUNNEL_SET_EVENT, &_event, sizeof(_event),
                          NULL, 0, &io_ret_len, NULL)) {
-        vd_printf("DeviceIoControl() failed: %u", GetLastError());
+        vd_printf("DeviceIoControl() failed: %lu", GetLastError());
         return false;
     }
     return true;

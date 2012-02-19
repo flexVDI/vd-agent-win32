@@ -55,12 +55,12 @@ void DisplaySetting::set(DisplaySettingOptions& opts)
     status = RegCreateKeyExA(HKEY_LOCAL_MACHINE, _reg_key.c_str(), 0, NULL,
                              REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, NULL, &hkey, &dispos);
     if (status != ERROR_SUCCESS) {
-        vd_printf("create/open registry key: fail %d", GetLastError());
+        vd_printf("create/open registry key: fail %lu", GetLastError());
     } else {
         status = RegSetValueExA(hkey, DISPLAY_SETTING_MASK_REG_VALUE, 0,
                                 REG_BINARY, &reg_mask, sizeof(reg_mask));
         if (status != ERROR_SUCCESS) {
-            vd_printf("setting registry key DisplaySettingMask: fail %d", GetLastError());
+            vd_printf("setting registry key DisplaySettingMask: fail %lu", GetLastError());
         }
         RegCloseKey(hkey);
     }
@@ -81,7 +81,7 @@ void DisplaySetting::load()
 
     status = RegOpenKeyExA(HKEY_LOCAL_MACHINE, _reg_key.c_str(), 0, KEY_READ, &hkey);
     if (status != ERROR_SUCCESS) {
-        vd_printf("open registry key: fail %d", status);
+        vd_printf("open registry key: fail %lu", status);
         return;
     }
 
@@ -90,7 +90,7 @@ void DisplaySetting::load()
                               &value_type, &setting_mask, &value_size);
 
     if (status != ERROR_SUCCESS) {
-        vd_printf("get registry mask value: fail %d", GetLastError());
+        vd_printf("get registry mask value: fail %lu", GetLastError());
         RegCloseKey(hkey);
         return;
     }
@@ -98,7 +98,7 @@ void DisplaySetting::load()
     RegCloseKey(hkey);
 
     if (value_type != REG_BINARY) {
-        vd_printf("get registry mask value: bad value type %d", value_type);
+        vd_printf("get registry mask value: bad value type %lu", value_type);
         return;
     }
 
@@ -126,19 +126,19 @@ DWORD DisplaySetting::get_user_process_id()
     DWORD agent_session_id;
 
     if (!ProcessIdToSessionId(GetCurrentProcessId(), &agent_session_id)) {
-        vd_printf("ProcessIdToSessionId for current process failed %u", GetLastError());
+        vd_printf("ProcessIdToSessionId for current process failed %lu", GetLastError());
         return 0;
     }
 
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snap == INVALID_HANDLE_VALUE) {
-        vd_printf("CreateToolhelp32Snapshot() failed %u", GetLastError());
+        vd_printf("CreateToolhelp32Snapshot() failed %lu", GetLastError());
         return 0;
     }
     ZeroMemory(&proc_entry, sizeof(proc_entry));
     proc_entry.dwSize = sizeof(PROCESSENTRY32);
     if (!Process32First(snap, &proc_entry)) {
-        vd_printf("Process32First() failed %u", GetLastError());
+        vd_printf("Process32First() failed %lu", GetLastError());
         CloseHandle(snap);
         return 0;
     }
@@ -146,7 +146,7 @@ DWORD DisplaySetting::get_user_process_id()
         if (_tcsicmp(proc_entry.szExeFile, TEXT("explorer.exe")) == 0) {
             DWORD explorer_session_id;
             if (!ProcessIdToSessionId(proc_entry.th32ProcessID, &explorer_session_id)) {
-                vd_printf("ProcessIdToSessionId for explorer failed %u", GetLastError());
+                vd_printf("ProcessIdToSessionId for explorer failed %lu", GetLastError());
                 break;
             }
             
@@ -207,13 +207,13 @@ bool DisplaySetting::reload_from_registry(DisplaySettingOptions& opts)
         vd_printf("get_user_process_id failed");
         return false;
     } else {
-        vd_printf("explorer pid %d", user_pid);
+        vd_printf("explorer pid %ld", user_pid);
     }
 
     hprocess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, user_pid);
 
     if (!OpenProcessToken(hprocess, TOKEN_ALL_ACCESS, &htoken)) {
-        vd_printf("OpenProcessToken: failed %d", GetLastError());
+        vd_printf("OpenProcessToken: failed %lu", GetLastError());
         CloseHandle(hprocess);
         return false;
     }
@@ -226,14 +226,14 @@ bool DisplaySetting::reload_from_registry(DisplaySettingOptions& opts)
 
         status = RegOpenCurrentUser(KEY_READ, &hkey_cur_user);
         if (status != ERROR_SUCCESS) {
-            vd_printf("RegOpenCurrentUser: failed %d", GetLastError());
+            vd_printf("RegOpenCurrentUser: failed %lu", GetLastError());
             throw;
         }
 
         status = RegOpenKeyExA(hkey_cur_user, USER_DESKTOP_REGISTRY_KEY, 0,
                                KEY_READ, &hkey_desktop);
         if (status != ERROR_SUCCESS) {
-            vd_printf("RegOpenKeyExA: failed %d", GetLastError());
+            vd_printf("RegOpenKeyExA: failed %lu", GetLastError());
             throw;
         }
 
@@ -273,11 +273,11 @@ bool DisplaySetting::reload_from_registry(DisplaySettingOptions& opts)
 
 bool DisplaySetting::disable_wallpaper()
 {
-    if (SystemParametersInfoA(SPI_SETDESKWALLPAPER, 0, "", 0)) {
+    if (SystemParametersInfoA(SPI_SETDESKWALLPAPER, 0, (void*)"", 0)) {
         vd_printf("disable wallpaper: success");
         return true;
     } else {
-        vd_printf("disable wallpaper: fail %d", GetLastError());
+        vd_printf("disable wallpaper: fail %lu", GetLastError());
         return false;
     }
 }
@@ -299,7 +299,7 @@ bool DisplaySetting::reload_wallpaper(HKEY desktop_reg_key)
     }
 
     if (value_type != REG_SZ) {
-        vd_printf("bad wallpaper value type %d (expected REG_SZ)", value_type);
+        vd_printf("bad wallpaper value type %lu (expected REG_SZ)", value_type);
         return false;
     }
 
@@ -320,7 +320,7 @@ bool DisplaySetting::reload_wallpaper(HKEY desktop_reg_key)
         vd_printf("reload wallpaper: success");
         return true;
     } else {
-        vd_printf("reload wallpaper: failed %d", GetLastError());
+        vd_printf("reload wallpaper: failed %lu", GetLastError());
         return false;
     }
 }
@@ -331,7 +331,7 @@ bool DisplaySetting::disable_font_smoothing()
         vd_printf("disable font smoothing: success");
         return true;
     } else {
-        vd_printf("disable font smoothing: fail %d", GetLastError());
+        vd_printf("disable font smoothing: fail %lu", GetLastError());
         return false;
     }
 }
@@ -353,7 +353,7 @@ bool DisplaySetting::reload_font_smoothing(HKEY desktop_reg_key)
     }
 
     if (value_type != REG_SZ) {
-        vd_printf("bad font smoothing value type %d (expected REG_SZ)", value_type);
+        vd_printf("bad font smoothing value type %lu (expected REG_SZ)", value_type);
         return false;
     }
 
@@ -382,7 +382,7 @@ bool DisplaySetting::reload_font_smoothing(HKEY desktop_reg_key)
         vd_printf("reload font smoothing: success");
         return true;
     } else {
-        vd_printf("reload font smoothing: failed %d", GetLastError());
+        vd_printf("reload font smoothing: failed %lu", GetLastError());
         return false;
     }
 }
@@ -401,7 +401,7 @@ bool DisplaySetting::disable_animation()
                               &win_animation, 0)) {
         vd_printf("disable window animation: success");
     } else {
-        vd_printf("disable window animation: fail %d", GetLastError());
+        vd_printf("disable window animation: fail %lu", GetLastError());
         ret = false;
     }
 
@@ -437,7 +437,7 @@ bool DisplaySetting::reload_win_animation(HKEY desktop_reg_key)
     RegCloseKey(win_metrics_hkey);
 
     if (value_type != REG_SZ) {
-        vd_printf("bad MinAnimate value type %d (expected REG_SZ)", value_type);
+        vd_printf("bad MinAnimate value type %lu (expected REG_SZ)", value_type);
         return false;
     }
 
@@ -460,7 +460,7 @@ bool DisplaySetting::reload_win_animation(HKEY desktop_reg_key)
         vd_printf("reload window animation: success");
         return false;
     } else {
-        vd_printf("reload window animation: fail %d", GetLastError());
+        vd_printf("reload window animation: fail %lu", GetLastError());
         return false;
     }
 }
@@ -468,7 +468,7 @@ bool DisplaySetting::reload_win_animation(HKEY desktop_reg_key)
 bool DisplaySetting::set_bool_system_parameter_info(int action, BOOL param)
 {
     if (!SystemParametersInfo(action, 0, (PVOID)param, 0)) {
-        vd_printf("SystemParametersInfo %d: failed %d", action, GetLastError());
+        vd_printf("SystemParametersInfo %d: failed %lu", action, GetLastError());
         return false;
     }
     return true;
@@ -490,11 +490,11 @@ bool DisplaySetting::reload_ui_effects(HKEY desktop_reg_key)
     }
     
     if (value_type != REG_BINARY) {
-        vd_printf("bad UserPreferencesMask value type %d (expected REG_BINARY)", value_type);
+        vd_printf("bad UserPreferencesMask value type %lu (expected REG_BINARY)", value_type);
         return false;
     }
     
-    vd_printf("UserPreferencesMask = %x %x", ui_mask[0], ui_mask[1]);
+    vd_printf("UserPreferencesMask = %lx %lx", ui_mask[0], ui_mask[1]);
 
     ret &= set_bool_system_parameter_info(SPI_SETUIEFFECTS, ui_mask[0] & 0x80000000);
     ret &= set_bool_system_parameter_info(SPI_SETACTIVEWINDOWTRACKING, ui_mask[0] & 0x01);

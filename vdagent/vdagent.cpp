@@ -205,7 +205,7 @@ DWORD WINAPI VDAgent::event_thread_proc(LPVOID param)
 {
     HANDLE desktop_event = OpenEvent(SYNCHRONIZE, FALSE, L"WinSta0_DesktopSwitch");
     if (!desktop_event) {
-        vd_printf("OpenEvent() failed: %d", GetLastError());
+        vd_printf("OpenEvent() failed: %lu", GetLastError());
         return 1;
     }
     while (_singleton->_running) {
@@ -216,7 +216,7 @@ DWORD WINAPI VDAgent::event_thread_proc(LPVOID param)
             break;
         case WAIT_TIMEOUT:
         default:
-            vd_printf("WaitForSingleObject(): %u", wait_ret);
+            vd_printf("WaitForSingleObject(): %lu", wait_ret);
         }
     }
     CloseHandle(desktop_event);
@@ -231,21 +231,21 @@ bool VDAgent::run()
     WNDCLASS wcls;
 
     if (!ProcessIdToSessionId(GetCurrentProcessId(), &session_id)) {
-        vd_printf("ProcessIdToSessionId failed %u", GetLastError());
+        vd_printf("ProcessIdToSessionId failed %lu", GetLastError());
         return false;
     }
-    vd_printf("***Agent started in session %u***", session_id);
+    vd_printf("***Agent started in session %lu***", session_id);
     log_version();
     if (!SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS)) {
-        vd_printf("SetPriorityClass failed %u", GetLastError());
+        vd_printf("SetPriorityClass failed %lu", GetLastError());
     }
     if (!SetProcessShutdownParameters(0x100, 0)) {
-        vd_printf("SetProcessShutdownParameters failed %u", GetLastError());
+        vd_printf("SetProcessShutdownParameters failed %lu", GetLastError());
     }
     _control_event = CreateEvent(NULL, FALSE, FALSE, NULL);
     _clipboard_event = CreateEvent(NULL, FALSE, FALSE, NULL);
     if (!_control_event || !_clipboard_event) {
-        vd_printf("CreateEvent() failed: %d", GetLastError());
+        vd_printf("CreateEvent() failed: %lu", GetLastError());
         cleanup();
         return false;
     }
@@ -253,7 +253,7 @@ bool VDAgent::run()
     wcls.lpfnWndProc = &VDAgent::wnd_proc;
     wcls.lpszClassName = VD_AGENT_WINCLASS_NAME;
     if (!RegisterClass(&wcls)) {
-        vd_printf("RegisterClass() failed: %d", GetLastError());
+        vd_printf("RegisterClass() failed: %lu", GetLastError());
         cleanup();
         return false;
     }
@@ -268,7 +268,7 @@ bool VDAgent::run()
     _running = true;
     event_thread = CreateThread(NULL, 0, event_thread_proc, NULL, 0, &event_thread_id);
     if (!event_thread) {
-        vd_printf("CreateThread() failed: %d", GetLastError());
+        vd_printf("CreateThread() failed: %lu", GetLastError());
         cleanup();
         return false;
     }
@@ -299,7 +299,7 @@ void VDAgent::set_control_event(int control_command)
     MUTEX_LOCK(_control_mutex);
     _control_queue.push(control_command);
     if (_control_event && !SetEvent(_control_event)) {
-        vd_printf("SetEvent() failed: %u", GetLastError());
+        vd_printf("SetEvent() failed: %lu", GetLastError());
     }
     MUTEX_UNLOCK(_control_mutex);
 }
@@ -334,19 +334,19 @@ void VDAgent::input_desktop_message_loop()
 
     hdesk = OpenInputDesktop(0, FALSE, GENERIC_ALL);
     if (!hdesk) {
-        vd_printf("OpenInputDesktop() failed: %u", GetLastError());
+        vd_printf("OpenInputDesktop() failed: %lu", GetLastError());
         _running = false;
         return;
     }
     if (!SetThreadDesktop(hdesk)) {
-        vd_printf("SetThreadDesktop failed %u", GetLastError());
+        vd_printf("SetThreadDesktop failed %lu", GetLastError());
         _running = false;
         return;
     }
     if (GetUserObjectInformation(hdesk, UOI_NAME, desktop_name, sizeof(desktop_name), NULL)) {
         vd_printf("Desktop: %S", desktop_name);
     } else {
-        vd_printf("GetUserObjectInformation failed %u", GetLastError());
+        vd_printf("GetUserObjectInformation failed %lu", GetLastError());
     }
 
     // loading the display settings for the current session's logged on user only
@@ -369,7 +369,7 @@ void VDAgent::input_desktop_message_loop()
 
     _hwnd = CreateWindow(VD_AGENT_WINCLASS_NAME, NULL, 0, 0, 0, 0, 0, NULL, NULL, NULL, NULL);
     if (!_hwnd) {
-        vd_printf("CreateWindow() failed: %u", GetLastError());
+        vd_printf("CreateWindow() failed: %lu", GetLastError());
         _running = false;
         return;
     }
@@ -391,7 +391,7 @@ void VDAgent::input_desktop_message_loop()
             break;
         case WAIT_TIMEOUT:
         default:
-            vd_printf("MsgWaitForMultipleObjectsEx(): %u", wait_ret);
+            vd_printf("MsgWaitForMultipleObjectsEx(): %lu", wait_ret);
         }
     }
     _desktop_switch = false;
@@ -424,14 +424,14 @@ bool VDAgent::send_input()
         if (KillTimer(_hwnd, VD_TIMER_ID)) {
             _pending_input = false;
         } else {
-            vd_printf("KillTimer failed: %d", GetLastError());
+            vd_printf("KillTimer failed: %lu", GetLastError());
             _running = false;
             _desktop_layout->unlock();
             return false;
         }
     }
     if (!SendInput(1, &_input, sizeof(INPUT)) && GetLastError() != ERROR_ACCESS_DENIED) {
-        vd_printf("SendInput failed: %d", GetLastError());
+        vd_printf("SendInput failed: %lu", GetLastError());
         ret = _running = false;
     }
     _input_time = GetTickCount();
@@ -497,7 +497,7 @@ bool VDAgent::handle_mouse_event(VDAgentMouseState* state)
         if (SetTimer(_hwnd, VD_TIMER_ID, VD_INPUT_INTERVAL_MS, NULL)) {
             _pending_input = true;
         } else {
-            vd_printf("SetTimer failed: %d", GetLastError());
+            vd_printf("SetTimer failed: %lu", GetLastError());
             _running = false;
             ret = false;
         }
@@ -1018,7 +1018,7 @@ bool VDAgent::handle_clipboard_request(VDAgentClipboardRequest* clipboard_reques
             vd_printf("Image encode to type %u failed", clipboard_request->type);
             break;
         }
-        vd_printf("Image encoded to %u bytes", new_size);
+        vd_printf("Image encoded to %lu bytes", new_size);
         break;
     }
     }
@@ -1121,19 +1121,19 @@ bool VDAgent::connect_pipe()
 
     ZeroMemory(&a->_pipe_state, sizeof(VDPipeState));
     if (!WaitNamedPipe(VD_SERVICE_PIPE_NAME, NMPWAIT_USE_DEFAULT_WAIT)) {
-        vd_printf("WaitNamedPipe() failed: %d", GetLastError());
+        vd_printf("WaitNamedPipe() failed: %lu", GetLastError());
         return false;
     }
     //assuming vdservice created the named pipe before creating this vdagent process
     pipe = CreateFile(VD_SERVICE_PIPE_NAME, GENERIC_READ | GENERIC_WRITE,
                       0, NULL, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, NULL);
     if (pipe == INVALID_HANDLE_VALUE) {
-        vd_printf("CreateFile() failed: %d", GetLastError());
+        vd_printf("CreateFile() failed: %lu", GetLastError());
         return false;
     }
     DWORD pipe_mode = PIPE_READMODE_MESSAGE | PIPE_WAIT;
     if (!SetNamedPipeHandleState(pipe, &pipe_mode, NULL, NULL)) {
-        vd_printf("SetNamedPipeHandleState() failed: %d", GetLastError());
+        vd_printf("SetNamedPipeHandleState() failed: %lu", GetLastError());
         CloseHandle(pipe);
         return false;
     }
@@ -1180,7 +1180,7 @@ void VDAgent::dispatch_message(VDAgentMessage* msg, uint32_t port)
         vd_printf("Unsupported message type %u size %u", msg->type, msg->size);
     }
     if (!res) {
-        vd_printf("handling message type %u failed: %u", msg->type, GetLastError());
+        vd_printf("handling message type %u failed: %lu", msg->type, GetLastError());
         a->_running = false;
     }
 }
@@ -1195,7 +1195,7 @@ VOID CALLBACK VDAgent::read_completion(DWORD err, DWORD bytes, LPOVERLAPPED over
         return;
     }
     if (err) {
-        vd_printf("vdservice disconnected (%u)", err);
+        vd_printf("vdservice disconnected (%lu)", err);
         a->_running = false;
         return;
     }
@@ -1219,7 +1219,7 @@ VOID CALLBACK VDAgent::read_completion(DWORD err, DWORD bytes, LPOVERLAPPED over
             }
             VDAgentMessage* msg = (VDAgentMessage*)pipe_msg->data;
             if (msg->protocol != VD_AGENT_PROTOCOL) {
-                vd_printf("Invalid protocol %u bytes %u", msg->protocol, bytes);
+                vd_printf("Invalid protocol %u bytes %lu", msg->protocol, bytes);
                 a->_running = false;
                 break;
             }
@@ -1251,7 +1251,7 @@ VOID CALLBACK VDAgent::read_completion(DWORD err, DWORD bytes, LPOVERLAPPED over
     if (a->_running && ps->read.end < sizeof(ps->read.data) &&
         !ReadFileEx(ps->pipe, ps->read.data + ps->read.end, sizeof(ps->read.data) - ps->read.end,
                     overlap, read_completion)) {
-        vd_printf("ReadFileEx() failed: %u", GetLastError());
+        vd_printf("ReadFileEx() failed: %lu", GetLastError());
         a->_running = false;
     }
 }
@@ -1266,7 +1266,7 @@ VOID CALLBACK VDAgent::write_completion(DWORD err, DWORD bytes, LPOVERLAPPED ove
         return;
     }
     if (err) {
-        vd_printf("vdservice disconnected (%u)", err);
+        vd_printf("vdservice disconnected (%lu)", err);
         a->_running = false;
         return;
     }
@@ -1283,7 +1283,7 @@ VOID CALLBACK VDAgent::write_completion(DWORD err, DWORD bytes, LPOVERLAPPED ove
                            ps->write.end - ps->write.start, overlap, write_completion)) {
         a->_pending_write = true;
     } else {
-        vd_printf("WriteFileEx() failed: %u", GetLastError());
+        vd_printf("WriteFileEx() failed: %lu", GetLastError());
         a->_running = false;
     }
     a->write_unlock();

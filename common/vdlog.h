@@ -54,7 +54,7 @@ static unsigned int log_level = LOG_INFO;
 #endif
 
 #define PRINT_LINE(type, format, datetime, ms, ...)                                             \
-    printf("%u::%s::%s,%.3d::%s::" format "\n", GetCurrentThreadId(), type, datetime, ms,       \
+    printf("%lu::%s::%s,%.3d::%s::" format "\n", GetCurrentThreadId(), type, datetime, ms,       \
            __FUNCTION__, ## __VA_ARGS__);
 
 #define LOG(type, format, ...) if (type >= log_level && type <= LOG_FATAL) {                    \

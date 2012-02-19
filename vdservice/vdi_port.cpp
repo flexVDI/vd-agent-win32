@@ -84,7 +84,7 @@ int VDIPort::handle_error()
         _read.start = _read.end = _read.ring;
         return VDI_PORT_RESET;
     default:
-        vd_printf("port io failed: %u", GetLastError());
+        vd_printf("port io failed: %lu", GetLastError());
         return VDI_PORT_ERROR;
     }
 }
