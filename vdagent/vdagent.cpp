@@ -976,7 +976,7 @@ bool VDAgent::handle_clipboard_request(VDAgentClipboardRequest* clipboard_reques
     HANDLE clip_data;
     uint8_t* new_data = NULL;
     long new_size;
-    size_t len;
+    size_t len = 0;
     CxImage image;
 
     if (_clipboard_owner != owner_guest) {
