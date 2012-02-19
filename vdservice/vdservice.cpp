@@ -460,7 +460,7 @@ bool VDService::init_vdi_port()
 {
     VDIPort* (*creators[])(void) = { create_virtio_vdi_port, create_pci_vdi_port };
 
-    for (int i = 0 ; i < sizeof(creators)/sizeof(creators[0]); ++i) {
+    for (unsigned int i = 0 ; i < sizeof(creators)/sizeof(creators[0]); ++i) {
         _vdi_port = creators[i]();
         if (_vdi_port->init()) {
             return true;

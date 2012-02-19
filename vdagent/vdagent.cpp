@@ -876,7 +876,7 @@ void VDAgent::on_clipboard_grab()
                                  VD_AGENT_CAP_CLIPBOARD_BY_DEMAND)) {
         return;
     }
-    for (int i = 0; i < clipboard_formats_count; i++) {
+    for (unsigned int i = 0; i < clipboard_formats_count; i++) {
         if (IsClipboardFormatAvailable(clipboard_formats[i].format)) {
             for (uint32_t* ptype = clipboard_formats[i].types; *ptype; ptype++) {
                 types[count++] = *ptype;
@@ -1065,7 +1065,7 @@ void VDAgent::handle_clipboard_release()
 
 uint32_t VDAgent::get_clipboard_format(uint32_t type)
 {
-    for (int i = 0; i < clipboard_formats_count; i++) {
+    for (unsigned int i = 0; i < clipboard_formats_count; i++) {
         for (uint32_t* ptype = clipboard_formats[i].types; *ptype; ptype++) {
             if (*ptype == type) {
                 return clipboard_formats[i].format;
@@ -1079,7 +1079,7 @@ uint32_t VDAgent::get_clipboard_type(uint32_t format)
 {
     uint32_t* types = NULL;
 
-    for (int i = 0; i < clipboard_formats_count && !types; i++) {
+    for (unsigned int i = 0; i < clipboard_formats_count && !types; i++) {
         if (clipboard_formats[i].format == format) {
             types = clipboard_formats[i].types;
         }
@@ -1097,7 +1097,7 @@ uint32_t VDAgent::get_clipboard_type(uint32_t format)
 
 DWORD VDAgent::get_cximage_format(uint32_t type)
 {
-    for (int i = 0; i < sizeof(image_types) / sizeof(image_types[0]); i++) {
+    for (unsigned int i = 0; i < sizeof(image_types) / sizeof(image_types[0]); i++) {
         if (image_types[i].type == type) {
             return image_types[i].cximage_format;
         }
