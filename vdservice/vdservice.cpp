@@ -893,7 +893,7 @@ bool VDService::launch_agent()
     ZeroMemory(&overlap, sizeof(overlap));
     overlap.hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
     DWORD err = (ConnectNamedPipe(_pipe_state.pipe, &overlap) ? 0 : GetLastError());
-    if (err = ERROR_IO_PENDING) {
+    if (err == ERROR_IO_PENDING) {
         HANDLE wait_handles[2] = {overlap.hEvent, _agent_proc_info.hProcess};
         DWORD wait_ret = WaitForMultipleObjects(2, wait_handles, FALSE, VD_AGENT_TIMEOUT);
         if (wait_ret != WAIT_OBJECT_0) {
