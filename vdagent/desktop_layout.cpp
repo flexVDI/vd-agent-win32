@@ -263,7 +263,7 @@ bool DesktopLayout::init_dev_mode(LPCTSTR dev_name, DEVMODE* dev_mode, DisplayMo
             best = i;
         }
     }
-    if (best == -1 || !EnumDisplaySettings(dev_name, best, dev_mode)) {
+    if (best == (DWORD)-1 || !EnumDisplaySettings(dev_name, best, dev_mode)) {
         return false;
     }
     dev_mode->dmFields = DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT;
