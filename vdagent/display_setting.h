@@ -35,7 +35,7 @@ public:
 
 class DisplaySetting {
 public:
-    DisplaySetting(char* registry_key) : _reg_key (registry_key) {}
+    DisplaySetting(const char* registry_key) : _reg_key (registry_key) {}
     void set(DisplaySettingOptions& opts);
     void load();
 
