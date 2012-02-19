@@ -19,6 +19,8 @@
 #include "desktop_layout.h"
 #include "display_setting.h"
 #include "ximage.h"
+#undef max
+#undef min
 #include <lmcons.h>
 #include <queue>
 #include <set>
