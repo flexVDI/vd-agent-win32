@@ -122,7 +122,6 @@ DWORD DisplaySetting::get_user_process_id()
 {
     PROCESSENTRY32 proc_entry;
     DWORD explorer_pid = 0;
-    HANDLE token = NULL;
     DWORD agent_session_id;
 
     if (!ProcessIdToSessionId(GetCurrentProcessId(), &agent_session_id)) {
