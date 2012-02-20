@@ -57,13 +57,19 @@ static unsigned int log_level = LOG_INFO;
     printf("%lu::%s::%s,%.3d::%s::" format "\n", GetCurrentThreadId(), type, datetime, ms,       \
            __FUNCTION__, ## __VA_ARGS__);
 
+#ifdef __MINGW32__
+#define vd_ftime_s _ftime
+#else
+#define vd_ftime_s _ftime_s
+#endif
+
 #define LOG(type, format, ...) if (type >= log_level && type <= LOG_FATAL) {                    \
     VDLog* log = VDLog::get();                                                                  \
     const char *type_as_char[] = { "DEBUG", "INFO", "WARN", "ERROR", "FATAL" };                 \
     struct _timeb now;                                                                          \
     struct tm today;                                                                            \
     char datetime_str[20];                                                                      \
-    _ftime_s(&now);                                                                             \
+    vd_ftime_s(&now);                                                                             \
     localtime_s(&today, &now.time);                                                             \
     strftime(datetime_str, 20, "%Y-%m-%d %H:%M:%S", &today);                                    \
     if (log) {                                                                                  \
