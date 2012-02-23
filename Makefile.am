@@ -34,4 +34,14 @@ vdservice_LDADD = -lwtsapi32
 vdagent_LDADD = $(CXIMAGE_LIBS)
 vdagent_CXXFLAGS = $(CXIMAGE_CFLAGS)
 
+EXTRA_DIST =			\
+	tests/clipboard.py	\
+	vdagent.sln		\
+	vdagent/resource.h	\
+	vdagent/vdagent.rc	\
+	vdagent/vdagent.vcproj	\
+	vdservice/vdservice.rc	\
+	vdservice/vdservice.vcproj
+
+
 -include $(top_srcdir)/git.mk
