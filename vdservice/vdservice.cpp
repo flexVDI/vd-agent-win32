@@ -1216,7 +1216,7 @@ void VDService::write_agent_control(uint32_t type, uint32_t opaque)
     }
 }
 
-int _tmain(int argc, TCHAR* argv[], TCHAR* envp[])
+int main(int argc, char* argv[], char* envp[])
 {
     bool success = false;
 
@@ -1226,9 +1226,9 @@ int _tmain(int argc, TCHAR* argv[], TCHAR* envp[])
     }
     VDService* vdservice = VDService::get();
     if (argc > 1) {
-        if (lstrcmpi(argv[1], TEXT("install")) == 0) {
+        if (strcmp(argv[1], "install") == 0) {
             success = vdservice->install();
-        } else if (lstrcmpi(argv[1], TEXT("uninstall")) == 0) {
+        } else if (strcmp(argv[1], "uninstall") == 0) {
             success = vdservice->uninstall();
         } else {
             printf("Use: vdservice install / uninstall\n");
