@@ -1355,7 +1355,7 @@ LRESULT CALLBACK VDAgent::wnd_proc(HWND hwnd, UINT message, WPARAM wparam, LPARA
     return 0;
 }
 
-int main(int argc,char **argv)
+int APIENTRY _tWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPTSTR cmd_line, int cmd_show)
 {
     VDAgent* vdagent = VDAgent::get();
     vdagent->run();
