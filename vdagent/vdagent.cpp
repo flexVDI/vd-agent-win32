@@ -178,8 +178,8 @@ VDAgent::VDAgent()
     , _display_setting (VD_AGENT_REGISTRY_KEY)
     , _logon_desktop (false)
     , _display_setting_initialized (false)
-    , _client_caps(NULL)
-    , _client_caps_size(0)
+    , _client_caps (NULL)
+    , _client_caps_size (0)
     , _log (NULL)
 {
     TCHAR log_path[MAX_PATH];
