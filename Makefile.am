@@ -1,7 +1,6 @@
 INCLUDES =				\
 	-I$(top_srcdir)/common		\
 	$(SPICE_PROTOCOL_CFLAGS)
-AM_CPPFLAGS=-DUNICODE -D_UNICODE
 
 bin_PROGRAMS = vdagent vdservice
 
