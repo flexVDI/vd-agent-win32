@@ -1216,7 +1216,22 @@ void VDService::write_agent_control(uint32_t type, uint32_t opaque)
     }
 }
 
-int _tmain(int argc, TCHAR* argv[], TCHAR* envp[])
+#ifdef __GNUC__
+#undef _tmain
+#ifdef UNICODE
+int _tmain(int argc, TCHAR* argv[]);
+int main(void)
+{
+   int argc;
+   argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+   return _tmain(argc, argv);
+}
+#else
+#define _tmain main
+#endif
+#endif
+
+int _tmain(int argc, TCHAR* argv[])
 {
     bool success = false;
 

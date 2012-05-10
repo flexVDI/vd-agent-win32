@@ -1355,7 +1355,11 @@ LRESULT CALLBACK VDAgent::wnd_proc(HWND hwnd, UINT message, WPARAM wparam, LPARA
     return 0;
 }
 
+#ifdef __GNUC__
+int main(int argc,char **argv)
+#else
 int APIENTRY _tWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPTSTR cmd_line, int cmd_show)
+#endif
 {
     VDAgent* vdagent = VDAgent::get();
     vdagent->run();
