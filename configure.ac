@@ -23,6 +23,7 @@ AC_PROG_CC
 AC_PROG_CXX
 AM_PROG_CC_C_O
 AC_PROG_INSTALL
+AC_CHECK_TOOL(WINDRES, [windres])
 
 dnl ---------------------------------------------------------------------------
 dnl - Extra verbose warning switches

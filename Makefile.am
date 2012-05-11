@@ -1,10 +1,19 @@
+NULL =
+MAINTAINERCLEANFILES =
+
 INCLUDES =				\
 	-I$(top_srcdir)/common		\
-	$(SPICE_PROTOCOL_CFLAGS)
+	$(SPICE_PROTOCOL_CFLAGS)	\
+	$(NULL)
+
 AM_CPPFLAGS=-DUNICODE -D_UNICODE
+# -lversion is needed for the GetFileVersion* API which is used by vdlog.cpp
+LIBS = -lversion
 
 bin_PROGRAMS = vdagent vdservice
 
+vdagent_LDADD = $(CXIMAGE_LIBS) vdagent_rc.$(OBJEXT)
+vdagent_CXXFLAGS = $(CXIMAGE_CFLAGS)
 vdagent_SOURCES =			\
 	common/vdcommon.h		\
 	common/vdlog.cpp		\
@@ -13,27 +22,34 @@ vdagent_SOURCES =			\
 	vdagent/desktop_layout.h	\
 	vdagent/display_setting.cpp	\
 	vdagent/display_setting.h	\
-	vdagent/vdagent.cpp
+	vdagent/vdagent.cpp		\
+	$(NULL)
 
+vdagent_rc.$(OBJEXT): vdagent/vdagent.rc
+	$(AM_V_GEN)$(WINDRES) -i $< -o $@
+
+MAINTAINERCLEANFILES += vdagent_rc.$(OBJEXT)
+
+vdservice_LDADD = -lwtsapi32 vdservice_rc.$(OBJEXT)
 vdservice_SOURCES =			\
 	common/stdint.h			\
 	common/vdcommon.h		\
 	common/vdlog.cpp		\
 	common/vdlog.h			\
-	vdservice/vdservice.cpp		\
 	vdservice/pci_vdi_port.cpp	\
 	vdservice/pci_vdi_port.h	\
-	vdservice/vdi_port.h		\
 	vdservice/vdi_port.cpp		\
+	vdservice/vdi_port.h		\
+	vdservice/vdservice.cpp		\
+	vdservice/virtio_vdi_port.cpp	\
 	vdservice/virtio_vdi_port.h	\
-	vdservice/virtio_vdi_port.cpp
+	$(NULL)
 
-# -lversion is needed for the GetFileVersion* API which is used by
-# vdlog.cpp
-LIBS = -lversion
-vdservice_LDADD = -lwtsapi32
-vdagent_LDADD = $(CXIMAGE_LIBS)
-vdagent_CXXFLAGS = $(CXIMAGE_CFLAGS)
+vdservice_rc.$(OBJEXT): vdservice/vdservice.rc
+	$(AM_V_GEN)$(WINDRES) -i $< -o $@
+
+MAINTAINERCLEANFILES += vdservice_rc.$(OBJEXT)
+
 
 EXTRA_DIST =			\
 	tests/clipboard.py	\
