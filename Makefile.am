@@ -6,7 +6,8 @@ INCLUDES =				\
 	$(SPICE_PROTOCOL_CFLAGS)	\
 	$(NULL)
 
-AM_CPPFLAGS=-DUNICODE -D_UNICODE
+AM_CPPFLAGS = -DUNICODE -D_UNICODE
+AM_LDFLAGS = -Wl,--subsystem,windows
 # -lversion is needed for the GetFileVersion* API which is used by vdlog.cpp
 LIBS = -lversion
 
