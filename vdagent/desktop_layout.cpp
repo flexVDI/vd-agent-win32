@@ -15,6 +15,7 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include <spice/qxl_windows.h>
 #include "desktop_layout.h"
 #include "vdlog.h"
 
@@ -240,6 +241,8 @@ bool DesktopLayout::init_dev_mode(LPCTSTR dev_name, DEVMODE* dev_mode, DisplayMo
 {
     DWORD closest_diff = -1;
     DWORD best = -1;
+    QXLEscapeSetCustomDisplay custom;
+    HDC hdc = NULL;
 
     ZeroMemory(dev_mode, sizeof(DEVMODE));
     dev_mode->dmSize = sizeof(DEVMODE);
@@ -248,6 +251,29 @@ bool DesktopLayout::init_dev_mode(LPCTSTR dev_name, DEVMODE* dev_mode, DisplayMo
         dev_mode->dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_POSITION;
         return true;
     }
+
+    // Update custom resolution
+    custom.xres = mode->_width;
+    custom.yres = mode->_height;
+    custom.bpp = mode->_depth;
+    hdc = CreateDC(dev_name, NULL, NULL, NULL);
+    if (!hdc) {
+        vd_printf("failed to create DC: %s", dev_name);
+    } else {
+        int err = ExtEscape(hdc, QXL_ESCAPE_SET_CUSTOM_DISPLAY,
+                            sizeof(QXLEscapeSetCustomDisplay), (LPCSTR)&custom, 0, NULL);
+        if (err <= 0) {
+            vd_printf("can't set custom display, perhaps an old driver");
+        }
+        DeleteDC(hdc);
+    }
+
+    // force refresh mode table
+    DEVMODE tempDevMode;
+    ZeroMemory(&tempDevMode, sizeof (tempDevMode));
+    tempDevMode.dmSize = sizeof(DEVMODE);
+    EnumDisplaySettings(dev_name, 0xffffff, &tempDevMode);
+
     //Find the closest size which will fit within the monitor
     for (DWORD i = 0; EnumDisplaySettings(dev_name, i, dev_mode); i++) {
         if (dev_mode->dmPelsWidth > mode->_width ||
