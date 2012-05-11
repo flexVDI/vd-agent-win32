@@ -53,32 +53,43 @@ static unsigned int log_level = LOG_DEBUG;
 static unsigned int log_level = LOG_INFO;
 #endif
 
-#define PRINT_LINE(type, format, datetime, ms, ...)                                             \
-    printf("%lu::%s::%s,%.3d::%s::" format "\n", GetCurrentThreadId(), type, datetime, ms,       \
+#define PRINT_LINE(type, format, datetime, ms, ...)                     \
+    printf("%lu::%s::%s,%.3d::%s::" format "\n", GetCurrentThreadId(), type, datetime, ms, \
            __FUNCTION__, ## __VA_ARGS__);
 
-#ifdef __MINGW32__
-#define vd_ftime_s _ftime
+#ifdef OLDMSVCRT
+#define LOG(type, format, ...) do {                                     \
+    if (type >= log_level && type <= LOG_FATAL) {                       \
+        VDLog* log = VDLog::get();                                      \
+        const char *type_as_char[] = { "DEBUG", "INFO", "WARN", "ERROR", "FATAL" }; \
+        if (log) {                                                      \
+            log->PRINT_LINE(type_as_char[type], format, "", 0, ## __VA_ARGS__); \
+        } else {                                                        \
+            PRINT_LINE(type_as_char[type], format, "", 0, ## __VA_ARGS__); \
+        }                                                               \
+    }                                                                   \
+} while(0)
 #else
-#define vd_ftime_s _ftime_s
+#define LOG(type, format, ...) do {                                     \
+    if (type >= log_level && type <= LOG_FATAL) {                       \
+        VDLog* log = VDLog::get();                                      \
+        const char *type_as_char[] = { "DEBUG", "INFO", "WARN", "ERROR", "FATAL" }; \
+        struct _timeb now;                                              \
+        struct tm today;                                                \
+        char datetime_str[20];                                          \
+        _ftime_s(&now);                                                 \
+        localtime_s(&today, &now.time);                                 \
+        strftime(datetime_str, 20, "%Y-%m-%d %H:%M:%S", &today);        \
+        if (log) {                                                      \
+            log->PRINT_LINE(type_as_char[type], format, datetime_str, now.millitm, ## __VA_ARGS__); \
+        } else {                                                        \
+            PRINT_LINE(type_as_char[type], format, datetime_str, now.millitm, ## __VA_ARGS__); \
+        }                                                               \
+    }                                                                   \
+} while(0)
 #endif
 
-#define LOG(type, format, ...) if (type >= log_level && type <= LOG_FATAL) {                    \
-    VDLog* log = VDLog::get();                                                                  \
-    const char *type_as_char[] = { "DEBUG", "INFO", "WARN", "ERROR", "FATAL" };                 \
-    struct _timeb now;                                                                          \
-    struct tm today;                                                                            \
-    char datetime_str[20];                                                                      \
-    vd_ftime_s(&now);                                                                             \
-    localtime_s(&today, &now.time);                                                             \
-    strftime(datetime_str, 20, "%Y-%m-%d %H:%M:%S", &today);                                    \
-    if (log) {                                                                                  \
-        log->PRINT_LINE(type_as_char[type], format, datetime_str, now.millitm, ## __VA_ARGS__); \
-    } else {                                                                                    \
-        PRINT_LINE(type_as_char[type], format, datetime_str, now.millitm, ## __VA_ARGS__);      \
-    }                                                                                           \
-}
- 
+
 #define vd_printf(format, ...) LOG(LOG_INFO, format, ## __VA_ARGS__)
 #define LOG_INFO(format, ...) LOG(LOG_INFO, format, ## __VA_ARGS__)
 #define LOG_WARN(format, ...) LOG(LOG_WARN, format, ## __VA_ARGS__)
@@ -86,11 +97,11 @@ static unsigned int log_level = LOG_INFO;
 
 #define DBGLEVEL 1000
 
-#define DBG(level, format, ...) {               \
+#define DBG(level, format, ...) do {            \
     if (level <= DBGLEVEL) {                    \
         LOG(LOG_DEBUG, format, ## __VA_ARGS__); \
     }                                           \
-}
+} while(0)
 
 #define ASSERT(x) _ASSERTE(x)
 

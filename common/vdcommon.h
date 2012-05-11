@@ -53,6 +53,10 @@ enum {
 #define ALIGN_VC __declspec (align(1))
 #endif
 
+#ifdef OLDMSVCRT
+#define swprintf_s(buf, sz, format...) swprintf(buf, format)
+#endif
+
 typedef struct ALIGN_VC VDPipeMessage {
     uint32_t type;
     uint32_t opaque;

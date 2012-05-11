@@ -52,7 +52,11 @@ VDLog* VDLog::get(TCHAR* path)
     }
     if (size != INVALID_FILE_SIZE && size > LOG_ROLL_SIZE) {
         TCHAR roll_path[MAX_PATH];
+#ifdef OLDMSVCRT
+        swprintf(roll_path, L"%s.1", path);
+#else
         swprintf_s(roll_path, MAX_PATH, L"%s.1", path);
+#endif
         if (!MoveFileEx(path, roll_path, MOVEFILE_REPLACE_EXISTING)) {
             return NULL;
         }
