@@ -3,7 +3,7 @@ MAINTAINERCLEANFILES =
 
 INCLUDES =				\
 	-I$(top_srcdir)/common		\
-	$(SPICE_PROTOCOL_CFLAGS)	\
+	-I$(top_srcdir)/spice-protocol	\
 	$(NULL)
 
 AM_CPPFLAGS = -DUNICODE -D_UNICODE
