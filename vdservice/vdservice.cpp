@@ -412,13 +412,12 @@ VOID WINAPI VDService::main(DWORD argc, TCHAR* argv[])
     status->dwServiceSpecificExitCode = NO_ERROR;
     status->dwCheckPoint = 0;
     status->dwWaitHint = 0;
+#ifndef  DEBUG_VDSERVICE
     s->_status_handle = RegisterServiceCtrlHandlerEx(VD_SERVICE_NAME, &VDService::control_handler,
                                                      NULL);
     if (!s->_status_handle) {
-        printf("RegisterServiceCtrlHandler failed\n");
-#ifndef DEBUG_VDSERVICE
+        vd_printf("RegisterServiceCtrlHandler failed\n");
         return;
-#endif // DEBUG_VDSERVICE
     }
 
     // service is starting
@@ -429,10 +428,12 @@ VOID WINAPI VDService::main(DWORD argc, TCHAR* argv[])
     status->dwControlsAccepted |= VDSERVICE_ACCEPTED_CONTROLS;
     status->dwCurrentState = SERVICE_RUNNING;
     SetServiceStatus(s->_status_handle, status);
+#endif //DEBUG_VDSERVICE
 
     s->_running = true;
     s->execute();
 
+#ifndef  DEBUG_VDSERVICE
     // service was stopped
     status->dwCurrentState = SERVICE_STOP_PENDING;
     SetServiceStatus(s->_status_handle, status);
@@ -440,7 +441,6 @@ VOID WINAPI VDService::main(DWORD argc, TCHAR* argv[])
     // service is stopped
     status->dwControlsAccepted &= ~VDSERVICE_ACCEPTED_CONTROLS;
     status->dwCurrentState = SERVICE_STOPPED;
-#ifndef DEBUG_VDSERVICE
     SetServiceStatus(s->_status_handle, status);
 #endif //DEBUG_VDSERVICE
     vd_printf("***Service stopped***");
