@@ -298,6 +298,11 @@ bool DesktopLayout::init_dev_mode(LPCTSTR dev_name, DEVMODE* dev_mode, DisplayMo
         dev_mode->dmPosition.y = mode->_pos_y;
         dev_mode->dmFields |= DM_POSITION;
     }
+
+    // update current DisplayMode (so mouse scaling works properly)
+    mode->_width = dev_mode->dmPelsWidth;
+    mode->_height = dev_mode->dmPelsHeight;
+
     return true;
 }
 
