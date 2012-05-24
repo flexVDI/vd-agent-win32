@@ -7,7 +7,6 @@ INCLUDES =				\
 	$(NULL)
 
 AM_CPPFLAGS = -DUNICODE -D_UNICODE
-AM_LDFLAGS = -Wl,--subsystem,windows
 # -lversion is needed for the GetFileVersion* API which is used by vdlog.cpp
 LIBS = -lversion
 
@@ -15,6 +14,7 @@ bin_PROGRAMS = vdagent vdservice
 
 vdagent_LDADD = $(CXIMAGE_LIBS) vdagent_rc.$(OBJEXT)
 vdagent_CXXFLAGS = $(CXIMAGE_CFLAGS)
+vdagent_LDFLAGS = -Wl,--subsystem,windows
 vdagent_SOURCES =			\
 	common/vdcommon.h		\
 	common/vdlog.cpp		\
