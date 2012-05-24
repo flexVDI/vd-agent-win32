@@ -1223,7 +1223,7 @@ int _tmain(int argc, TCHAR* argv[]);
 int main(void)
 {
    int argc;
-   argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+   TCHAR** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
    return _tmain(argc, argv);
 }
 #else
