@@ -918,13 +918,32 @@ void VDAgent::on_clipboard_request(UINT format)
                                  VD_AGENT_CAP_CLIPBOARD_BY_DEMAND)) {
         return;
     }
+
     VDAgentClipboardRequest request = {type};
     if (!write_message(VD_AGENT_CLIPBOARD_REQUEST, sizeof(request), &request)) {
         return;
     }
+
+    // next clipboard event will be considered a reply to this request
+    ResetEvent(_clipboard_event);
+
     DWORD start_tick = GetTickCount();
-    while (WaitForSingleObjectEx(_clipboard_event, 1000, TRUE) != WAIT_OBJECT_0 &&
-           GetTickCount() < start_tick + VD_CLIPBOARD_TIMEOUT_MS);
+    do {
+        DWORD wait_result = WaitForSingleObjectEx(_clipboard_event, 1000, TRUE);
+
+        switch (wait_result) {
+        case WAIT_OBJECT_0:
+            return;
+        case WAIT_IO_COMPLETION:
+        case WAIT_TIMEOUT:
+            break;
+        default:
+            vd_printf("Wait error (%d)\n", GetLastError());
+            return;
+        }
+    } while (GetTickCount() < start_tick + VD_CLIPBOARD_TIMEOUT_MS);
+
+    vd_printf("wait timeout.. ");
 }
 
 void VDAgent::on_clipboard_release()
