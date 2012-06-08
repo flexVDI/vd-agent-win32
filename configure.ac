@@ -65,6 +65,7 @@ dnl - Check library dependencies
 dnl ---------------------------------------------------------------------------
 
 PKG_CHECK_MODULES(CXIMAGE, [cximage])
+CXIMAGE_LIBS=`$PKG_CONFIG --static --libs cximage`
 
 dnl ---------------------------------------------------------------------------
 dnl - Makefiles, etc.

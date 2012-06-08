@@ -6,15 +6,18 @@ INCLUDES =				\
 	-I$(top_srcdir)/spice-protocol	\
 	$(NULL)
 
-AM_CPPFLAGS = -DUNICODE -D_UNICODE
+AM_CXXFLAGS = -flto -fwhole-program
+AM_CPPFLAGS = -DUNICODE -D_UNICODE -DOLDMSVCRT
+AM_LDFLAGS = -static -s
+
 # -lversion is needed for the GetFileVersion* API which is used by vdlog.cpp
 LIBS = -lversion
 
 bin_PROGRAMS = vdagent vdservice
 
 vdagent_LDADD = $(CXIMAGE_LIBS) vdagent_rc.$(OBJEXT)
-vdagent_CXXFLAGS = $(CXIMAGE_CFLAGS)
-vdagent_LDFLAGS = -Wl,--subsystem,windows
+vdagent_CXXFLAGS = $(AM_CXXFLAGS) $(CXIMAGE_CFLAGS)
+vdagent_LDFLAGS = $(AM_LDFLAGS) -Wl,--subsystem,windows
 vdagent_SOURCES =			\
 	common/vdcommon.h		\
 	common/vdlog.cpp		\
