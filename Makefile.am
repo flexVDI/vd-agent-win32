@@ -8,7 +8,10 @@ INCLUDES =				\
 
 AM_CXXFLAGS = -flto -fwhole-program
 AM_CPPFLAGS = -DUNICODE -D_UNICODE -DOLDMSVCRT
-AM_LDFLAGS = -static -s
+AM_LDFLAGS = -static
+if !ENABLE_DEBUG
+AM_LDFLAGS += -s
+endif
 
 # -lversion is needed for the GetFileVersion* API which is used by vdlog.cpp
 LIBS = -lversion
