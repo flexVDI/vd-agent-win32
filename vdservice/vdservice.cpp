@@ -211,7 +211,8 @@ VDService::~VDService()
 bool VDService::run()
 {
 #ifndef DEBUG_VDSERVICE
-    SERVICE_TABLE_ENTRY service_table[] = {{VD_SERVICE_NAME, main}, {0, 0}};
+    SERVICE_TABLE_ENTRY service_table[] = {
+        {const_cast<LPTSTR>(VD_SERVICE_NAME), main}, {0, 0}};
     return !!StartServiceCtrlDispatcher(service_table);
 #else
     main(0, NULL);
@@ -241,7 +242,7 @@ bool VDService::install()
                                       0, 0, 0, 0);
     if (service) {
         SERVICE_DESCRIPTION descr;
-        descr.lpDescription = VD_SERVICE_DESCRIPTION;
+        descr.lpDescription = const_cast<LPTSTR>(VD_SERVICE_DESCRIPTION);
         if (!ChangeServiceConfig2(service, SERVICE_CONFIG_DESCRIPTION, &descr)) {
             printf("ChangeServiceConfig2 failed\n");
         }
@@ -854,7 +855,7 @@ bool VDService::launch_agent()
 
     ZeroMemory(&startup_info, sizeof(startup_info));
     startup_info.cb = sizeof(startup_info);
-    startup_info.lpDesktop = TEXT("Winsta0\\winlogon");
+    startup_info.lpDesktop = const_cast<LPTSTR>(TEXT("Winsta0\\winlogon"));
     ZeroMemory(&_agent_proc_info, sizeof(_agent_proc_info));
     if (_system_version == SYS_VER_WIN_XP_CLASS) {
         if (_session_id == 0) {
@@ -873,7 +874,7 @@ bool VDService::launch_agent()
             }
         }
     } else if (_system_version == SYS_VER_WIN_7_CLASS) {
-        startup_info.lpDesktop = TEXT("Winsta0\\default");
+        startup_info.lpDesktop = const_cast<LPTSTR>(TEXT("Winsta0\\default"));
         ret = create_process_as_user(_session_id, _agent_path, _agent_path, NULL, NULL, FALSE, 0,
                                      NULL, NULL, &startup_info, &_agent_proc_info);
     } else {

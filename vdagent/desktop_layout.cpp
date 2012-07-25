@@ -258,7 +258,7 @@ bool DesktopLayout::init_dev_mode(LPCTSTR dev_name, DEVMODE* dev_mode, DisplayMo
     custom.bpp = mode->_depth;
     hdc = CreateDC(dev_name, NULL, NULL, NULL);
     if (!hdc) {
-        vd_printf("failed to create DC: %s", dev_name);
+        vd_printf("failed to create DC");
     } else {
         int err = ExtEscape(hdc, QXL_ESCAPE_SET_CUSTOM_DISPLAY,
                             sizeof(QXLEscapeSetCustomDisplay), (LPCSTR)&custom, 0, NULL);

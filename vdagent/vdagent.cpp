@@ -938,7 +938,7 @@ void VDAgent::on_clipboard_request(UINT format)
         case WAIT_TIMEOUT:
             break;
         default:
-            vd_printf("Wait error (%d)\n", GetLastError());
+            vd_printf("Wait error (%lu)\n", GetLastError());
             return;
         }
     } while (GetTickCount() < start_tick + VD_CLIPBOARD_TIMEOUT_MS);
