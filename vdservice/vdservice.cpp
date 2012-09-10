@@ -590,6 +590,16 @@ bool VDService::execute()
                         restart_agent(false);
                     } else if (_system_version == SYS_VER_WIN_7_CLASS) {
                         kill_agent();
+                        // Assume agent was killed due to console disconnect, and wait for agent
+                        // normal restart due to console connect. If the agent is not alive yet,
+                        // it was killed manually (or crashed), so let's restart it.
+                        if (WaitForSingleObject(_control_event, VD_AGENT_RESTART_INTERVAL) ==
+                                WAIT_OBJECT_0) {
+                            handle_control_event();
+                        }
+                        if (_running && !_agent_alive) {
+                            restart_agent(false);
+                        }
                     }
                 } else {
                     if (wait_ret >= WAIT_OBJECT_0 + _events_vdi_port_base &&
