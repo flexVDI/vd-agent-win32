@@ -429,9 +429,14 @@ bool VDAgent::send_input()
             return false;
         }
     }
-    if (!SendInput(1, &_input, sizeof(INPUT)) && GetLastError() != ERROR_ACCESS_DENIED) {
-        vd_printf("SendInput failed: %lu", GetLastError());
-        ret = _running = false;
+    if (!SendInput(1, &_input, sizeof(INPUT))) {
+        DWORD err = GetLastError();
+        // Don't stop agent due to UIPI blocking, which is usually only for specific windows
+        // of system security applications (anti-viruses etc.)
+        if (err != ERROR_SUCCESS && err != ERROR_ACCESS_DENIED) {
+            vd_printf("SendInput failed: %lu", err);
+            ret = _running = false;
+        }
     }
     _input_time = GetTickCount();
     _desktop_layout->unlock();
