@@ -167,7 +167,7 @@ void VirtioVDIPort::read_completion()
     if (!GetOverlappedResult(_handle, &_read.overlap, &bytes, FALSE)) {
         DWORD err = GetLastError();
 
-        if (err == ERROR_OPERATION_ABORTED) {
+        if (err == ERROR_OPERATION_ABORTED || err == ERROR_NO_SYSTEM_RESOURCES) {
             _read.pending = false;
             return;
         } else if (err != ERROR_MORE_DATA) {
