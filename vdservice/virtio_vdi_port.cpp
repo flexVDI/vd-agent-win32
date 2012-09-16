@@ -51,17 +51,21 @@ void VirtioVDIPort::fill_events(HANDLE* handles) {
     handles[VIRTIO_VDI_PORT_EVENT_READ] = _read.overlap.hEvent;
 }
 
-void VirtioVDIPort::handle_event(int event) {
+bool VirtioVDIPort::handle_event(int event) {
+    bool ret;
+
     switch (event) {
         case VIRTIO_VDI_PORT_EVENT_WRITE:
-            write_completion();
+            ret = write_completion();
             break;
         case VIRTIO_VDI_PORT_EVENT_READ:
-            read_completion();
+            ret = read_completion();
             break;
         default:
             vd_printf("ERROR: unexpected event %d", event);
+            ret = false;
     }
+    return ret;
 }
 
 bool VirtioVDIPort::init()
@@ -113,20 +117,21 @@ int VirtioVDIPort::write()
     return ret;
 }
 
-void VirtioVDIPort::write_completion()
+bool VirtioVDIPort::write_completion()
 {
     DWORD bytes;
 
     if (!_write.pending) {
-        return;
+        return true;
     }
     if (!GetOverlappedResult(_handle, &_write.overlap, &bytes, FALSE)) {
         vd_printf("GetOverlappedResult failed: %lu", GetLastError());
-        return;
+        return false;
     }
     _write.start = _write.ring + (_write.start - _write.ring + bytes) % BUF_SIZE;
     _write.bytes = bytes;
     _write.pending = false;
+    return true;
 }
 
 int VirtioVDIPort::read()
@@ -160,7 +165,7 @@ int VirtioVDIPort::read()
     return ret;
 }
 
-void VirtioVDIPort::read_completion()
+bool VirtioVDIPort::read_completion()
 {
     DWORD bytes;
 
@@ -169,13 +174,14 @@ void VirtioVDIPort::read_completion()
 
         if (err == ERROR_OPERATION_ABORTED || err == ERROR_NO_SYSTEM_RESOURCES) {
             _read.pending = false;
-            return;
+            return true;
         } else if (err != ERROR_MORE_DATA) {
             vd_printf("GetOverlappedResult failed: %lu", err);
-            return;
+            return false;
         }
     }
     _read.end = _read.ring + (_read.end - _read.ring + bytes) % BUF_SIZE;
     _read.bytes = bytes;
     _read.pending = false;
+    return true;
 }

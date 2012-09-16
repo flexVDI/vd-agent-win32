@@ -61,7 +61,7 @@ public:
     virtual bool init() = 0;
     virtual unsigned get_num_events() = 0;
     virtual void fill_events(HANDLE* handles) = 0;
-    virtual void handle_event(int event) = 0;
+    virtual bool handle_event(int event) = 0;
     virtual int write() = 0;
     virtual int read() = 0;
 

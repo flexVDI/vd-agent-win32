@@ -130,7 +130,6 @@ private:
     bool _running;
     VDLog* _log;
     unsigned _events_count;
-    unsigned _events_vdi_port_base;
 };
 
 VDService* VDService::_singleton = NULL;
@@ -185,7 +184,6 @@ VDService::VDService()
     , _running (false)
     , _log (NULL)
     , _events_count(0)
-    , _events_vdi_port_base(0)
 {
     ZeroMemory(&_agent_proc_info, sizeof(_agent_proc_info));
     ZeroMemory(&_pipe_state, sizeof(_pipe_state));
@@ -536,13 +534,12 @@ bool VDService::execute()
     vd_printf("created %s", _vdi_port->name());
     _events_count = VD_STATIC_EVENTS_COUNT + _vdi_port->get_num_events() + 1 /*for agent*/;
     _events = new HANDLE[_events_count];
-    _events_vdi_port_base = VD_STATIC_EVENTS_COUNT;
     ZeroMemory(_events, _events_count);
     vd_printf("Connected to server");
     _events[VD_EVENT_PIPE_READ] = _pipe_state.read.overlap.hEvent;
     _events[VD_EVENT_PIPE_WRITE] = _pipe_state.write.overlap.hEvent;
     _events[VD_EVENT_CONTROL] = _control_event;
-    _vdi_port->fill_events(&_events[_events_vdi_port_base]);
+    _vdi_port->fill_events(&_events[VD_STATIC_EVENTS_COUNT]);
     _chunk_size = _chunk_port = 0;
     read_pipe();
     while (_running) {
@@ -602,12 +599,12 @@ bool VDService::execute()
                         }
                     }
                 } else {
-                    if (wait_ret >= WAIT_OBJECT_0 + _events_vdi_port_base &&
-                        wait_ret < WAIT_OBJECT_0 +
-                                   _events_vdi_port_base + _vdi_port->get_num_events()) {
-                        _vdi_port->handle_event(wait_ret - VD_STATIC_EVENTS_COUNT - WAIT_OBJECT_0);
+                    int vdi_event = wait_ret - VD_STATIC_EVENTS_COUNT - WAIT_OBJECT_0;
+                    if (vdi_event >= 0 && vdi_event < _vdi_port->get_num_events()) {
+                        _running = _vdi_port->handle_event(vdi_event);
                     } else {
                         vd_printf("WaitForMultipleObjects failed %lu", GetLastError());
+                        _running = false;
                     }
                 }
             }

@@ -124,8 +124,9 @@ int PCIVDIPort::read()
     return n;
 }
 
-void PCIVDIPort::handle_event(int event)
+bool PCIVDIPort::handle_event(int event)
 {
     // do nothing - the event merely serves to wake us up, then we call read/write
     // at VDService::execute start of while(_running) loop.
+    return true;
 }

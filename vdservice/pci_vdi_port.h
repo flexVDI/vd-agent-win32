@@ -41,7 +41,7 @@ public:
     virtual int read();
     virtual unsigned get_num_events() { return PCI_VDI_PORT_EVENT_COUNT; }
     virtual void fill_events(HANDLE* handles);
-    virtual void handle_event(int event);
+    virtual bool handle_event(int event);
 
 private:
     HANDLE _handle;

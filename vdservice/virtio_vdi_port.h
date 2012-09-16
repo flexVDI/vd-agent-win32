@@ -17,13 +17,13 @@ public:
     virtual bool init();
     virtual unsigned get_num_events() { return VIRTIO_VDI_PORT_EVENT_COUNT; }
     virtual void fill_events(HANDLE* handles);
-    virtual void handle_event(int event);
+    virtual bool handle_event(int event);
     virtual int write();
     virtual int read();
 
 private:
-    void write_completion();
-    void read_completion();
+    bool write_completion();
+    bool read_completion();
 
 private:
     static VirtioVDIPort* _singleton;
