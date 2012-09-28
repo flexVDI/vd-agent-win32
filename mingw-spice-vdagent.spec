@@ -1,0 +1,81 @@
+%{?mingw_package_hedder}
+
+Name:           mingw-spice-vdagent
+Version:        0.7.0
+Release:        1%{?dist}%{?extra_release}
+Summary:        MinGW Windows SPICE guest agent
+
+License:        GPLv2+
+URL:            http://spice-space.org/
+Source0:        vdagent-win-%{version}.tar.xz
+
+BuildRequires:  mingw32-filesystem >= 23
+BuildRequires:  mingw64-filesystem >= 23
+BuildRequires:  mingw32-cximage
+BuildRequires:  mingw64-cximage
+BuildRequires:  pkgconfig
+
+BuildArch:      noarch
+
+%package -n mingw32-spice-vdagent
+Summary:        MinGW Windows SPICE guest agent
+
+%package -n mingw64-spice-vdagent
+Summary:        MinGW Windows SPICE guest agent
+
+%description
+Spice agent for Windows guests offering the following features:
+
+Features:
+* Client mouse mode (no need to grab mouse by client, no mouse lag)
+  this is handled by the daemon by feeding mouse events into the kernel
+  via uinput.
+* Automatic adjustment of the Windows desktop resolution to the client resolution
+* Support of copy and paste (text and images) between the active Windows
+  session and the client
+
+%description -n mingw32-spice-vdagent
+Spice agent for Windows guests offering the following features:
+
+Features:
+* Client mouse mode (no need to grab mouse by client, no mouse lag)
+  this is handled by the daemon by feeding mouse events into the kernel
+  via uinput.
+* Automatic adjustment of the Windows desktop resolution to the client resolution
+* Support of copy and paste (text and images) between the active Windows
+  session and the client
+
+%description -n mingw64-spice-vdagent
+Spice agent for Windows guests offering the following features:
+
+Features:
+* Client mouse mode (no need to grab mouse by client, no mouse lag)
+  this is handled by the daemon by feeding mouse events into the kernel
+  via uinput.
+* Automatic adjustment of the Windows desktop resolution to the client resolution
+* Support of copy and paste (text and images) between the active Windows
+  session and the client
+
+%prep
+%setup -q -n vdagent-win-%{version}
+
+
+%build
+%mingw_configure
+%mingw_make %{?_smp_mflags} V=1
+
+
+%install
+%mingw_make_install DESTDIR=$RPM_BUILD_ROOT
+
+%files -n mingw32-spice-vdagent
+%defattr(-,root,root)
+%{mingw32_bindir}/vdagent.exe
+%{mingw32_bindir}/vdservice.exe
+
+%files -n mingw64-spice-vdagent
+%defattr(-,root,root)
+%{mingw64_bindir}/vdagent.exe
+%{mingw64_bindir}/vdservice.exe
+
+%changelog
