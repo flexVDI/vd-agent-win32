@@ -1,6 +1,8 @@
 NULL =
 MAINTAINERCLEANFILES =
 
+DIST_SUBDIRS = spice-protocol
+
 INCLUDES =				\
 	-I$(top_srcdir)/common		\
 	-I$(top_srcdir)/spice-protocol	\

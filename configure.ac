@@ -75,6 +75,7 @@ CXIMAGE_LIBS=`$PKG_CONFIG --static --libs cximage`
 dnl ---------------------------------------------------------------------------
 dnl - Makefiles, etc.
 dnl ---------------------------------------------------------------------------
+AC_CONFIG_SUBDIRS([spice-protocol])
 AC_CONFIG_FILES([
 Makefile
 ])
