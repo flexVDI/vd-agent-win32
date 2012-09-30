@@ -66,6 +66,7 @@ EXTRA_DIST =			\
 	vdagent/resource.h	\
 	vdagent/vdagent.rc	\
 	vdagent/vdagent.vcproj	\
+	vdservice/resource.h	\
 	vdservice/vdservice.rc	\
 	vdservice/vdservice.vcproj
 
