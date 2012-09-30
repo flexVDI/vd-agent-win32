@@ -3,8 +3,8 @@
 AC_PREREQ(2.63)
 
 m4_define([vdagent_major_version], [0])
-m4_define([vdagent_minor_version], [0])
-m4_define([vdagent_micro_version], [1])
+m4_define([vdagent_minor_version], [7])
+m4_define([vdagent_micro_version], [0])
 m4_define([vdagent_version],
           [vdagent_major_version.vdagent_minor_version.vdagent_micro_version])
 
