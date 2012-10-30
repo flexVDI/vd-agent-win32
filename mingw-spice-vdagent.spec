@@ -13,8 +13,18 @@ Source0:        vdagent-win-%{version}%{?_version_suffix}.tar.xz
 
 BuildRequires:  mingw32-filesystem >= 23
 BuildRequires:  mingw64-filesystem >= 23
-BuildRequires:  mingw32-cximage
-BuildRequires:  mingw64-cximage
+BuildRequires:  mingw32-cximage-static
+BuildRequires:  mingw64-cximage-static
+BuildRequires:  mingw32-jasper-static
+BuildRequires:  mingw64-jasper-static
+BuildRequires:  mingw32-libjpeg-turbo-static
+BuildRequires:  mingw64-libjpeg-turbo-static
+BuildRequires:  mingw32-libpng-static
+BuildRequires:  mingw64-libpng-static
+BuildRequires:  mingw32-libtiff-static
+BuildRequires:  mingw64-libtiff-static
+BuildRequires:  mingw32-zlib-static
+BuildRequires:  mingw64-zlib-static
 BuildRequires:  pkgconfig
 
 BuildArch:      noarch
