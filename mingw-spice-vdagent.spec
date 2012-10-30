@@ -1,5 +1,7 @@
 %{?mingw_package_hedder}
 
+#define _version_suffix -e198
+
 Name:           mingw-spice-vdagent
 Version:        0.7.0
 Release:        1%{?dist}%{?extra_release}
@@ -7,7 +9,7 @@ Summary:        MinGW Windows SPICE guest agent
 
 License:        GPLv2+
 URL:            http://spice-space.org/
-Source0:        vdagent-win-%{version}.tar.xz
+Source0:        vdagent-win-%{version}%{?_version_suffix}.tar.xz
 
 BuildRequires:  mingw32-filesystem >= 23
 BuildRequires:  mingw64-filesystem >= 23
@@ -57,7 +59,7 @@ Features:
   session and the client
 
 %prep
-%setup -q -n vdagent-win-%{version}
+%setup -q -n vdagent-win-%{version}%{?_version_suffix}
 
 
 %build
