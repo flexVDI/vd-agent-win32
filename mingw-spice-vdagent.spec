@@ -1,4 +1,4 @@
-%{?mingw_package_hedder}
+%{?mingw_package_header}
 
 #define _version_suffix -e198
 
