@@ -2,13 +2,9 @@
 # Copyright (C) 2011 Christophe Fergeau <cfergeau@redhat.com>
 AC_PREREQ(2.63)
 
-m4_define([vdagent_major_version], [0])
-m4_define([vdagent_minor_version], [7])
-m4_define([vdagent_micro_version], [0])
-m4_define([vdagent_version],
-          [vdagent_major_version.vdagent_minor_version.vdagent_micro_version])
+AC_INIT([vdagent-win],
+        m4_esyscmd([build-aux/git-version-gen .tarball-version]))
 
-AC_INIT([vdagent-win],[vdagent_version])
 AC_CONFIG_SRCDIR([vdagent])
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_MACRO_DIR([m4])

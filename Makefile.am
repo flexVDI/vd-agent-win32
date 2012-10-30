@@ -61,6 +61,7 @@ MAINTAINERCLEANFILES += vdservice_rc.$(OBJEXT)
 
 
 EXTRA_DIST =			\
+	$(top_srcdir)/.version	\
 	tests/clipboard.py	\
 	vdagent.sln		\
 	vdagent/resource.h	\
@@ -69,6 +70,15 @@ EXTRA_DIST =			\
 	vdservice/resource.h	\
 	vdservice/vdservice.rc	\
 	vdservice/vdservice.vcproj
+
+# see git-version-gen
+dist-hook:
+	echo $(VERSION) > $(distdir)/.tarball-version
+
+BUILT_SOURCES = $(top_srcdir)/.version
+$(top_srcdir)/.version:
+	echo $(VERSION) > $@-t && mv $@-t $@
+
 
 
 -include $(top_srcdir)/git.mk
