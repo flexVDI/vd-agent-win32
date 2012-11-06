@@ -18,13 +18,10 @@
 #include <windows.h>
 #include <winternl.h>
 #include <wtsapi32.h>
-#include <userenv.h>
 #include <stdio.h>
 #include <tlhelp32.h>
 #include <queue>
 #include "vdcommon.h"
-#include "virtio_vdi_port.h"
-#include "pci_vdi_port.h"
 
 //#define DEBUG_VDSERVICE
 
@@ -45,21 +42,16 @@
 // This enum simplifies WaitForMultipleEvents for static
 // events, that is handles that are guranteed non NULL.
 // It doesn't include:
-// VirtioVDIPort Handles - these are filled by an interface because
-//  of variable handle number.
 // VDAgent handle - this can be 1 or 0 (NULL or not), so it is also added at
 //  the end of VDService::_events
 enum {
-    VD_EVENT_PIPE_READ = 0,
-    VD_EVENT_PIPE_WRITE,
-    VD_EVENT_CONTROL,
+    VD_EVENT_CONTROL = 0,
     VD_STATIC_EVENTS_COUNT // Must be last
 };
 
 enum {
     VD_CONTROL_IDLE = 0,
     VD_CONTROL_STOP,
-    VD_CONTROL_LOGON,
     VD_CONTROL_RESTART_AGENT,
 };
 
@@ -80,16 +72,8 @@ private:
     static DWORD WINAPI control_handler(DWORD control, DWORD event_type,
                                         LPVOID event_data, LPVOID context);
     static VOID WINAPI main(DWORD argc, TCHAR * argv[]);
-    bool init_vdi_port();
     void set_control_event(int control_command);
     void handle_control_event();
-    void pipe_write_completion();
-    void pipe_read_completion();
-    void write_agent_control(uint32_t type, uint32_t opaque);
-    void read_pipe();
-    void handle_pipe_data(DWORD bytes);
-    void handle_port_data();
-    bool handle_agent_control(VDPipeMessage* msg);
     bool restart_agent(bool normal_restart);
     bool launch_agent();
     bool kill_agent();
@@ -110,22 +94,14 @@ private:
     HANDLE _control_event;
     HANDLE* _events;
     TCHAR _agent_path[MAX_PATH];
-    VDIPort* _vdi_port;
-    VDPipeState _pipe_state;
     VDControlQueue _control_queue;
     mutex_t _control_mutex;
     mutex_t _agent_mutex;
     uint32_t _connection_id;
     DWORD _session_id;
-    DWORD _chunk_port;
-    DWORD _chunk_size;
     DWORD _last_agent_restart_time;
     int _agent_restarts;
     int _system_version;
-    bool _pipe_connected;
-    bool _pending_reset;
-    bool _pending_write;
-    bool _pending_read;
     bool _agent_alive;
     bool _running;
     VDLog* _log;
@@ -169,28 +145,18 @@ int supported_system_version()
 VDService::VDService()
     : _status_handle (0)
     , _events (NULL)
-    , _vdi_port (NULL)
     , _connection_id (0)
     , _session_id (0)
-    , _chunk_port (0)
-    , _chunk_size (0)
     , _last_agent_restart_time (0)
     , _agent_restarts (0)
-    , _pipe_connected (false)
-    , _pending_reset (false)
-    , _pending_write (false)
-    , _pending_read (false)
     , _agent_alive (false)
     , _running (false)
     , _log (NULL)
     , _events_count(0)
 {
     ZeroMemory(&_agent_proc_info, sizeof(_agent_proc_info));
-    ZeroMemory(&_pipe_state, sizeof(_pipe_state));
     _system_version = supported_system_version();
     _control_event = CreateEvent(NULL, FALSE, FALSE, NULL);
-    _pipe_state.write.overlap.hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
-    _pipe_state.read.overlap.hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
     _agent_path[0] = wchar_t('\0');
     MUTEX_INIT(_agent_mutex);
     MUTEX_INIT(_control_mutex);
@@ -199,8 +165,6 @@ VDService::VDService()
 
 VDService::~VDService()
 {
-    CloseHandle(_pipe_state.read.overlap.hEvent);
-    CloseHandle(_pipe_state.write.overlap.hEvent);
     CloseHandle(_control_event);
     delete _events;
     delete _log;
@@ -320,13 +284,9 @@ void VDService::handle_control_event()
     while (_control_queue.size()) {
         int control_command = _control_queue.front();
         _control_queue.pop();
-        vd_printf("Control command %d", control_command);
         switch (control_command) {
         case VD_CONTROL_STOP:
             _running = false;
-            break;
-        case VD_CONTROL_LOGON:
-            write_agent_control(VD_AGENT_SESSION_LOGON, 0);
             break;
         case VD_CONTROL_RESTART_AGENT:
             _running = restart_agent(true);
@@ -361,13 +321,9 @@ DWORD WINAPI VDService::control_handler(DWORD control, DWORD event_type, LPVOID 
         DWORD session_id = ((WTSSESSION_NOTIFICATION*)event_data)->dwSessionId;
         vd_printf("Session %lu %s", session_id, session_events[event_type]);
         SetServiceStatus(s->_status_handle, &s->_status);
-        if (s->_system_version != SYS_VER_UNSUPPORTED) {
-            if (event_type == WTS_CONSOLE_CONNECT) {
-                s->_session_id = session_id;
-                s->set_control_event(VD_CONTROL_RESTART_AGENT);
-            } else if (event_type == WTS_SESSION_LOGON) {
-                s->set_control_event(VD_CONTROL_LOGON);
-            }
+        if (event_type == WTS_CONSOLE_CONNECT) {
+            s->_session_id = session_id;
+            s->set_control_event(VD_CONTROL_RESTART_AGENT);
         }
         break;
     }
@@ -445,57 +401,12 @@ VOID WINAPI VDService::main(DWORD argc, TCHAR* argv[])
     vd_printf("***Service stopped***");
 }
 
-VDIPort *create_virtio_vdi_port()
-{
-    return new VirtioVDIPort();
-}
-
-VDIPort *create_pci_vdi_port()
-{
-    return new PCIVDIPort();
-}
-
-bool VDService::init_vdi_port()
-{
-    VDIPort* (*creators[])(void) = { create_virtio_vdi_port, create_pci_vdi_port };
-
-    for (unsigned int i = 0 ; i < sizeof(creators)/sizeof(creators[0]); ++i) {
-        _vdi_port = creators[i]();
-        if (_vdi_port->init()) {
-            return true;
-        }
-        delete _vdi_port;
-    }
-    _vdi_port = NULL;
-    return false;
-}
-
 bool VDService::execute()
 {
-    SECURITY_ATTRIBUTES sec_attr;
-    SECURITY_DESCRIPTOR* sec_desr;
-    HANDLE pipe;
     INT* con_state = NULL;
     bool con_state_active = false;
     DWORD bytes;
 
-    sec_desr = (SECURITY_DESCRIPTOR*)LocalAlloc(LPTR, SECURITY_DESCRIPTOR_MIN_LENGTH);
-    InitializeSecurityDescriptor(sec_desr, SECURITY_DESCRIPTOR_REVISION);
-    SetSecurityDescriptorDacl(sec_desr, TRUE, (PACL)NULL, FALSE);
-    sec_attr.nLength = sizeof(sec_attr);
-    sec_attr.bInheritHandle = TRUE;
-    sec_attr.lpSecurityDescriptor = sec_desr;
-    pipe = CreateNamedPipe(VD_SERVICE_PIPE_NAME, PIPE_ACCESS_DUPLEX |
-                           FILE_FLAG_FIRST_PIPE_INSTANCE | FILE_FLAG_OVERLAPPED,
-                           PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
-                           PIPE_UNLIMITED_INSTANCES, BUF_SIZE, BUF_SIZE,
-                           VD_AGENT_TIMEOUT, &sec_attr);
-    LocalFree(sec_desr);
-    if (pipe == INVALID_HANDLE_VALUE) {
-        vd_printf("CreatePipe() failed: %lu", GetLastError());
-        return false;
-    }
-    _pipe_state.pipe = pipe;
     _session_id = WTSGetActiveConsoleSessionId();
     if (_session_id == 0xFFFFFFFF) {
         vd_printf("WTSGetActiveConsoleSessionId() failed");
@@ -517,101 +428,52 @@ bool VDService::execute()
         if (_running) {
             vd_printf("Failed launching vdagent instance, waiting for session connection");
         }
-        while (_running && !_pipe_connected) {
+        while (_running) {
             if (WaitForSingleObject(_control_event, INFINITE) == WAIT_OBJECT_0) {
                 handle_control_event();
             }
         }
     }
-    if (_running && !init_vdi_port()) {
-        vd_printf("Failed to create VDIPort instance");
-        _running = false;
-    }
     if (!_running) {
-        CloseHandle(pipe);
         return false;
     }
-    vd_printf("created %s", _vdi_port->name());
-    _events_count = VD_STATIC_EVENTS_COUNT + _vdi_port->get_num_events() + 1 /*for agent*/;
+    _events_count = VD_STATIC_EVENTS_COUNT + 1 /*for agent*/;
     _events = new HANDLE[_events_count];
     ZeroMemory(_events, _events_count);
-    vd_printf("Connected to server");
-    _events[VD_EVENT_PIPE_READ] = _pipe_state.read.overlap.hEvent;
-    _events[VD_EVENT_PIPE_WRITE] = _pipe_state.write.overlap.hEvent;
     _events[VD_EVENT_CONTROL] = _control_event;
-    _vdi_port->fill_events(&_events[VD_STATIC_EVENTS_COUNT]);
-    _chunk_size = _chunk_port = 0;
-    read_pipe();
     while (_running) {
-        int cont_read = _vdi_port->read();
-        int cont_write = _vdi_port->write();
-        bool cont = false;
-
-        if (cont_read >= 0 && cont_write >= 0) {
-            cont = cont_read || cont_write;
-        } else if (cont_read == VDI_PORT_ERROR || cont_write == VDI_PORT_ERROR) {
-            vd_printf("VDI Port error, read %d write %d", cont_read, cont_write);
-            _running = false;
-        } else if (cont_read == VDI_PORT_RESET || cont_write == VDI_PORT_RESET) {
-            vd_printf("VDI Port reset, read %d write %d", cont_read, cont_write);
-            _chunk_size = _chunk_port = 0;
-            write_agent_control(VD_AGENT_RESET, ++_connection_id);
-            _pending_reset = true;
-        }
-        if (cont) {
-            handle_port_data();
-        }
-        if (cont_write) {
-            handle_pipe_data(0);
-        }
-        if (_running && (!cont || _pending_read || _pending_write)) {
-            unsigned actual_events = fill_agent_event();
-            DWORD wait_ret = WaitForMultipleObjects(actual_events, _events, FALSE,
-                                                              cont ? 0 : INFINITE);
-            switch (wait_ret) {
-            case WAIT_OBJECT_0 + VD_EVENT_PIPE_READ:
-                pipe_read_completion();
-                break;
-            case WAIT_OBJECT_0 + VD_EVENT_PIPE_WRITE:
-                pipe_write_completion();
-                break;
-            case WAIT_OBJECT_0 + VD_EVENT_CONTROL:
-                handle_control_event();
-                break;
-            case WAIT_TIMEOUT:
-                break;
-            default:
-                if (wait_ret == WAIT_OBJECT_0 + _events_count - 1) {
-                    vd_printf("Agent killed");
-                    if (_system_version == SYS_VER_WIN_XP_CLASS) {
-                        restart_agent(false);
-                    } else if (_system_version == SYS_VER_WIN_7_CLASS) {
-                        kill_agent();
-                        // Assume agent was killed due to console disconnect, and wait for agent
-                        // normal restart due to console connect. If the agent is not alive yet,
-                        // it was killed manually (or crashed), so let's restart it.
-                        if (WaitForSingleObject(_control_event, VD_AGENT_RESTART_INTERVAL) ==
-                                WAIT_OBJECT_0) {
-                            handle_control_event();
-                        }
-                        if (_running && !_agent_alive) {
-                            restart_agent(false);
-                        }
-                    }
-                } else {
-                    int vdi_event = wait_ret - VD_STATIC_EVENTS_COUNT - WAIT_OBJECT_0;
-                    if (vdi_event >= 0 && vdi_event < _vdi_port->get_num_events()) {
-                        _running = _vdi_port->handle_event(vdi_event);
-                    } else {
-                        vd_printf("WaitForMultipleObjects failed %lu", GetLastError());
-                        _running = false;
-                    }
+        unsigned actual_events = fill_agent_event();
+        DWORD wait_ret = WaitForMultipleObjects(actual_events, _events, FALSE, INFINITE);
+        switch (wait_ret) {
+        case WAIT_OBJECT_0 + VD_EVENT_CONTROL:
+            handle_control_event();
+            break;
+        case WAIT_OBJECT_0 + VD_STATIC_EVENTS_COUNT:
+            vd_printf("Agent killed");
+            if (_system_version == SYS_VER_WIN_XP_CLASS) {
+                restart_agent(false);
+            } else if (_system_version == SYS_VER_WIN_7_CLASS) {
+                kill_agent();
+                // Assume agent was killed due to console disconnect, and wait for agent
+                // normal restart due to console connect. If the agent is not alive yet,
+                // it was killed manually (or crashed), so let's restart it.
+                if (WaitForSingleObject(_control_event, VD_AGENT_RESTART_INTERVAL) ==
+                        WAIT_OBJECT_0) {
+                    handle_control_event();
+                }
+                if (_running && !_agent_alive) {
+                    restart_agent(false);
                 }
             }
+            break;
+        case WAIT_TIMEOUT:
+            break;
+        default:
+            vd_printf("WaitForMultipleObjects failed %lu", GetLastError());
+            _running = false;
         }
     }
-    delete _vdi_port;
-    CloseHandle(pipe);
+    kill_agent();
     return true;
 }
 
@@ -857,7 +719,6 @@ BOOL create_process_as_user(IN DWORD session_id, IN LPCWSTR application_name,
 bool VDService::launch_agent()
 {
     STARTUPINFO startup_info;
-    OVERLAPPED overlap;
     BOOL ret = FALSE;
 
     ZeroMemory(&startup_info, sizeof(startup_info));
@@ -893,34 +754,7 @@ bool VDService::launch_agent()
         return false;
     }
     _agent_alive = true;
-    if (_pipe_connected) {
-        vd_printf("Pipe already connected");
-        return false;
-    }
-    vd_printf("Wait for vdagent to connect");
-    ZeroMemory(&overlap, sizeof(overlap));
-    overlap.hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
-    DWORD err = (ConnectNamedPipe(_pipe_state.pipe, &overlap) ? 0 : GetLastError());
-    if (err == ERROR_IO_PENDING) {
-        HANDLE wait_handles[2] = {overlap.hEvent, _agent_proc_info.hProcess};
-        DWORD wait_ret = WaitForMultipleObjects(2, wait_handles, FALSE, VD_AGENT_TIMEOUT);
-        if (wait_ret != WAIT_OBJECT_0) {
-            _agent_proc_info.hProcess = 0;
-            vd_printf("Failed waiting for vdagent connection: %lu error: %lu", wait_ret,
-                wait_ret == WAIT_FAILED ? GetLastError() : 0);
-            ret = FALSE;
-        }
-    } else if (err != 0 && err != ERROR_PIPE_CONNECTED) {
-        vd_printf("ConnectNamedPipe() failed: %lu", err);
-        ret = FALSE;
-    }
-    if (ret) {
-        vd_printf("Pipe connected by vdagent");
-        _pipe_connected = true;
-        _pending_reset = false;
-    }
-    CloseHandle(overlap.hEvent);
-    return !!ret;
+    return true;
 }
 
 bool VDService::kill_agent()
@@ -936,16 +770,12 @@ bool VDService::kill_agent()
     _agent_alive = false;
     proc_handle = _agent_proc_info.hProcess;
     _agent_proc_info.hProcess = 0;
-    if (_pipe_connected) {
-        _pipe_connected = false;
-        DisconnectNamedPipe(_pipe_state.pipe);
-    }
+    TerminateProcess(proc_handle, 0);
     if (GetProcessId(proc_handle)) {
         wait_ret = WaitForSingleObject(proc_handle, VD_AGENT_TIMEOUT);
         switch (wait_ret) {
         case WAIT_OBJECT_0:
             if (GetExitCodeProcess(proc_handle, &exit_code)) {
-                vd_printf("vdagent exit code %lu", exit_code);
                 ret = (exit_code != STILL_ACTIVE);
             } else {
                 vd_printf("GetExitCodeProcess() failed: %lu", GetLastError());
@@ -984,9 +814,6 @@ bool VDService::restart_agent(bool normal_restart)
         }
         _last_agent_restart_time = time;
         ret = true;
-        if (_vdi_port) {
-            read_pipe();
-        }
     }
     MUTEX_UNLOCK(_agent_mutex);
     return ret;
@@ -996,232 +823,6 @@ void VDService::stop()
 {
     vd_printf("Service stopped");
     set_control_event(VD_CONTROL_STOP);
-}
-
-void VDService::pipe_write_completion()
-{
-    VDPipeState* ps = &this->_pipe_state;
-    DWORD bytes;
-
-    if (!_running) {
-        return;
-    }
-    if (_pending_write) {
-        if (GetOverlappedResult(_pipe_state.pipe, &_pipe_state.write.overlap, &bytes, FALSE)) {
-            ps->write.start += bytes;
-            if (ps->write.start == ps->write.end) {
-                ps->write.start = ps->write.end = 0;
-            }
-        } else if (GetLastError() == ERROR_IO_PENDING){
-            vd_printf("Overlapped write is pending");
-            return;
-        } else {
-            vd_printf("GetOverlappedResult() failed : %lu", GetLastError());
-        }
-        _pending_write = false;
-    }
-
-    if (ps->write.start < ps->write.end) {
-        _pending_write = true;
-        if (!WriteFile(ps->pipe, ps->write.data + ps->write.start,
-                       ps->write.end - ps->write.start, NULL, &_pipe_state.write.overlap)) {
-            vd_printf("vdagent disconnected (%lu)", GetLastError());
-            _pending_write = false;
-            _pipe_connected = false;
-            DisconnectNamedPipe(_pipe_state.pipe);
-        }
-    } else {
-        _pending_write = false;
-    }
-}
-
-void VDService::pipe_read_completion()
-{
-    DWORD bytes = 0;
-    DWORD err = ERROR_SUCCESS;
-
-    if (!_pipe_connected || !_pending_read) {
-        return;
-    }
-    _pending_read = false;
-    if (!GetOverlappedResult(_pipe_state.pipe, &_pipe_state.read.overlap, &bytes, FALSE)) {
-        err = GetLastError();
-    }
-    switch (err) {
-    case ERROR_SUCCESS:
-    case ERROR_MORE_DATA:
-        handle_pipe_data(bytes);
-        read_pipe();
-        break;
-    case ERROR_IO_INCOMPLETE:
-        break;
-    default:
-        vd_printf("vdagent disconnected (%lu)", err);
-        _pipe_connected = false;
-        DisconnectNamedPipe(_pipe_state.pipe);
-    }
-}
-
-void VDService::read_pipe()
-{
-    VDPipeState* ps = &_pipe_state;
-    DWORD bytes;
-
-    if (ps->read.end < sizeof(ps->read.data)) {
-        _pending_read = true;
-        if (ReadFile(ps->pipe, ps->read.data + ps->read.end, sizeof(ps->read.data) - ps->read.end,
-                     &bytes, &ps->read.overlap) || GetLastError() == ERROR_MORE_DATA) {
-            _pending_read = false;
-            handle_pipe_data(bytes);
-            read_pipe();
-        } else if (GetLastError() != ERROR_IO_PENDING) {
-            vd_printf("vdagent disconnected (%lu)", GetLastError());
-            _pending_read = false;
-            _pipe_connected = false;
-            DisconnectNamedPipe(_pipe_state.pipe);
-        }
-    } else {
-        _pending_read = false;
-    }
-}
-
-//FIXME: division to max size chunks should be here, not in the agent
-void VDService::handle_pipe_data(DWORD bytes)
-{
-    VDPipeState* ps = &_pipe_state;
-    DWORD read_size;
-
-    if (bytes) {
-        _pending_read = false;
-    }
-    if (!_running) {
-        return;
-    }
-    ps->read.end += bytes;
-    while (_running && (read_size = ps->read.end - ps->read.start) >= sizeof(VDPipeMessage)) {
-        VDPipeMessage* pipe_msg = (VDPipeMessage*)&ps->read.data[ps->read.start];
-        if (pipe_msg->type != VD_AGENT_COMMAND) {
-            handle_agent_control(pipe_msg);
-            ps->read.start += sizeof(VDPipeMessage);
-            continue;
-        }
-        if (read_size < sizeof(VDPipeMessage) + pipe_msg->size) {
-            break;
-        }
-        if (_vdi_port->write_ring_free_space() < sizeof(VDIChunkHeader) + pipe_msg->size) {
-            //vd_printf("DEBUG: no space in write ring %u", _vdi_port->write_ring_free_space());
-            break;
-        }
-        if (!_pending_reset) {
-            VDIChunkHeader chunk;
-            chunk.port = pipe_msg->opaque;
-            chunk.size = pipe_msg->size;
-            if (_vdi_port->ring_write(&chunk, sizeof(chunk)) != sizeof(chunk) ||
-                    _vdi_port->ring_write(pipe_msg->data, chunk.size) != chunk.size) {
-                vd_printf("ring_write failed");
-                _running = false;
-                return;
-            }
-        }
-        ps->read.start += (sizeof(VDPipeMessage) + pipe_msg->size);
-    }
-    if (ps->read.start == ps->read.end && !_pending_read) {
-        DWORD prev_read_end = ps->read.end;
-        ps->read.start = ps->read.end = 0;
-        if (prev_read_end == sizeof(ps->read.data)) {
-            read_pipe();
-        }
-    }
-}
-
-void VDService::handle_port_data()
-{
-    VDPipeMessage* pipe_msg;
-    VDIChunkHeader chunk;
-    int chunks_count = 0;
-    DWORD count = 0;
-
-    while (_running) {
-        if (!_chunk_size && _vdi_port->read_ring_size() >= sizeof(chunk)) {
-            if (_vdi_port->ring_read(&chunk, sizeof(chunk)) != sizeof(chunk)) {
-                vd_printf("ring_read of chunk header failed");
-                _running = false;
-                break;
-            }
-            count = sizeof(VDPipeMessage) + chunk.size;
-            if (_pipe_state.write.end + count > sizeof(_pipe_state.write.data)) {
-                vd_printf("chunk is too large, size %u port %u", chunk.size, chunk.port);
-                _running = false;
-                break;
-            }
-            _chunk_size = chunk.size;
-            _chunk_port = chunk.port;
-        }
-        if (_chunk_size && _vdi_port->read_ring_size() >= _chunk_size) {
-            count = sizeof(VDPipeMessage) + _chunk_size;
-            ASSERT(_pipe_state.write.end + count <= sizeof(_pipe_state.write.data));
-            pipe_msg = (VDPipeMessage*)&_pipe_state.write.data[_pipe_state.write.end];
-            if (_vdi_port->ring_read(pipe_msg->data, _chunk_size) != _chunk_size) {
-                vd_printf("ring_read of chunk data failed");
-                _running = false;
-                break;
-            }
-            if (_pipe_connected) {
-                pipe_msg->type = VD_AGENT_COMMAND;
-                pipe_msg->opaque = _chunk_port;
-                pipe_msg->size = _chunk_size;
-                _pipe_state.write.end += count;
-                chunks_count++;
-            } else {
-                _pipe_state.write.start = _pipe_state.write.end = 0;
-            }
-            _chunk_size = 0;
-            _chunk_port = 0;
-        } else {
-            break;
-        }
-    }
-    if (_pipe_connected && chunks_count && !_pending_write) {
-        pipe_write_completion();
-    }
-}
-
-bool VDService::handle_agent_control(VDPipeMessage* msg)
-{
-    switch (msg->type) {
-    case VD_AGENT_RESET_ACK: {
-        if (msg->opaque != _connection_id) {
-            vd_printf("Agent reset ack mismatch %u %u", msg->opaque, _connection_id);
-            break;
-        }
-        vd_printf("Agent reset ack");
-        _pending_reset = false;
-        break;
-    }
-    default:
-        vd_printf("Unsupported control %u %u", msg->type, msg->opaque);
-        return false;
-    }
-    return true;
-}
-
-void VDService::write_agent_control(uint32_t type, uint32_t opaque)
-{
-    if (!_pipe_connected) {
-        return;
-    }
-    if (_pipe_state.write.end + sizeof(VDPipeMessage) > sizeof(_pipe_state.write.data)) {
-        vd_printf("msg is too large");
-        _running = false;
-        return;
-    }
-    VDPipeMessage* msg = (VDPipeMessage*)&_pipe_state.write.data[_pipe_state.write.end];
-    msg->type = type;
-    msg->opaque = opaque;
-    _pipe_state.write.end += sizeof(VDPipeMessage);
-    if (!_pending_write) {
-        pipe_write_completion();
-    }
 }
 
 #ifdef __GNUC__

@@ -335,10 +335,6 @@
 			UniqueIdentifier="{93995380-89BD-4b04-88EB-625FBE52EBFB}"
 			>
 			<File
-				RelativePath=".\pci_vdi_port.h"
-				>
-			</File>
-			<File
 				RelativePath=".\resource.h"
 				>
 			</File>
@@ -347,15 +343,7 @@
 				>
 			</File>
 			<File
-				RelativePath=".\vdi_port.h"
-				>
-			</File>
-			<File
 				RelativePath="..\common\vdlog.h"
-				>
-			</File>
-			<File
-				RelativePath=".\virtio_vdi_port.h"
 				>
 			</File>
 		</Filter>
@@ -375,23 +363,11 @@
 			UniqueIdentifier="{4FC737F1-C7A5-4376-A066-2A32D752A2FF}"
 			>
 			<File
-				RelativePath=".\pci_vdi_port.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\vdi_port.cpp"
-				>
-			</File>
-			<File
 				RelativePath="..\common\vdlog.cpp"
 				>
 			</File>
 			<File
 				RelativePath=".\vdservice.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\virtio_vdi_port.cpp"
 				>
 			</File>
 		</Filter>
