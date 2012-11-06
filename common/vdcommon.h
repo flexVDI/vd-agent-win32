@@ -32,18 +32,7 @@ typedef CRITICAL_SECTION mutex_t;
 #define MUTEX_LOCK(mutex) EnterCriticalSection(&mutex)
 #define MUTEX_UNLOCK(mutex) LeaveCriticalSection(&mutex)
 
-#define VD_SERVICE_PIPE_NAME   TEXT("\\\\.\\pipe\\vdservicepipe")
-#define VD_MESSAGE_HEADER_SIZE (sizeof(VDPipeMessage) + sizeof(VDAgentMessage))
-#define VD_PIPE_BUF_SIZE       (1024 * 1024)
 #define VD_AGENT_REGISTRY_KEY "SOFTWARE\\Red Hat\\Spice\\vdagent\\"
-
-enum {
-    VD_AGENT_COMMAND,
-    VD_AGENT_RESET,
-    VD_AGENT_RESET_ACK,
-    VD_AGENT_QUIT,
-    VD_AGENT_SESSION_LOGON,
-};
 
 #if defined __GNUC__
 #define ALIGN_GCC __attribute__ ((packed))
@@ -56,26 +45,6 @@ enum {
 #ifdef OLDMSVCRT
 #define swprintf_s(buf, sz, format...) swprintf(buf, format)
 #endif
-
-typedef struct ALIGN_VC VDPipeMessage {
-    uint32_t type;
-    uint32_t opaque;
-    uint32_t size;
-    uint8_t data[0];
-} ALIGN_GCC VDPipeMessage;
-
-typedef struct VDPipeBuffer {
-    OVERLAPPED overlap;
-    DWORD start;
-    DWORD end;
-    uint8_t data[VD_PIPE_BUF_SIZE];
-} VDPipeBuffer;
-
-typedef struct VDPipeState {
-    HANDLE pipe;
-    VDPipeBuffer write;
-    VDPipeBuffer read;
-} VDPipeState;
 
 #endif
 
