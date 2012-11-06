@@ -65,7 +65,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="Version.lib zlibwapiD.lib png_d.lib cximage_d.lib"
+				AdditionalDependencies="Version.lib zlibwapiD.lib png_d.lib cximage_d.lib wtsapi32.lib"
 				LinkIncremental="2"
 				AdditionalLibraryDirectories="&quot;$(SPICE_LIBS)\lib&quot;"
 				GenerateDebugInformation="true"
@@ -143,7 +143,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="Version.lib zlibwapiD.lib png_d.lib cximage_d.lib"
+				AdditionalDependencies="Version.lib zlibwapiD.lib png_d.lib cximage_d.lib wtsapi32.lib"
 				LinkIncremental="2"
 				AdditionalLibraryDirectories="&quot;$(SPICE_LIBS)\lib64&quot;"
 				IgnoreDefaultLibraryNames=""
@@ -220,7 +220,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="Version.lib zlibwapi.lib png.lib cximage.lib"
+				AdditionalDependencies="Version.lib zlibwapi.lib png.lib cximage.lib wtsapi32.lib"
 				LinkIncremental="1"
 				AdditionalLibraryDirectories="&quot;$(SPICE_LIBS)\lib&quot;"
 				GenerateDebugInformation="true"
@@ -299,7 +299,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="Version.lib zlibwapi.lib png.lib cximage.lib"
+				AdditionalDependencies="Version.lib zlibwapi.lib png.lib cximage.lib wtsapi32.lib"
 				LinkIncremental="1"
 				AdditionalLibraryDirectories="&quot;$(SPICE_LIBS)\lib64&quot;"
 				GenerateDebugInformation="true"
@@ -350,11 +350,23 @@
 				>
 			</File>
 			<File
+				RelativePath=".\pci_vdi_port.cpp"
+				>
+			</File>
+			<File
 				RelativePath=".\vdagent.cpp"
 				>
 			</File>
 			<File
+				RelativePath=".\vdi_port.cpp"
+				>
+			</File>
+			<File
 				RelativePath="..\common\vdlog.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\virtio_vdi_port.cpp"
 				>
 			</File>
 		</Filter>
@@ -372,6 +384,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\pci_vdi_port.h"
+				>
+			</File>
+			<File
 				RelativePath=".\resource.h"
 				>
 			</File>
@@ -380,7 +396,15 @@
 				>
 			</File>
 			<File
+				RelativePath=".\vdi_port.h"
+				>
+			</File>
+			<File
 				RelativePath="..\common\vdlog.h"
+				>
+			</File>
+			<File
+				RelativePath=".\virtio_vdi_port.h"
 				>
 			</File>
 		</Filter>

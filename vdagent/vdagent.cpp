@@ -16,11 +16,14 @@
 */
 
 #include "vdcommon.h"
+#include "virtio_vdi_port.h"
+#include "pci_vdi_port.h"
 #include "desktop_layout.h"
 #include "display_setting.h"
 #include "ximage.h"
 #undef max
 #undef min
+#include <wtsapi32.h>
 #include <lmcons.h>
 #include <queue>
 #include <set>
@@ -56,6 +59,18 @@ static ImageType image_types[] = {
     {VD_AGENT_CLIPBOARD_IMAGE_BMP, CXIMAGE_FORMAT_BMP},
 };
 
+typedef struct ALIGN_VC VDIChunk {
+    VDIChunkHeader hdr;
+    uint8_t data[0];
+} ALIGN_GCC VDIChunk;
+
+#define VD_MESSAGE_HEADER_SIZE (sizeof(VDIChunk) + sizeof(VDAgentMessage))
+
+enum {
+    VD_EVENT_CONTROL = 0,
+    VD_STATIC_EVENTS_COUNT // Must be last
+};
+
 class VDAgent {
 public:
     static VDAgent* get();
@@ -74,7 +89,9 @@ private:
     bool handle_clipboard_request(VDAgentClipboardRequest* clipboard_request);
     void handle_clipboard_release();
     bool handle_display_config(VDAgentDisplayConfig* display_config, uint32_t port);
-    bool handle_control(VDPipeMessage* msg);
+    void handle_port_in();
+    void handle_port_out();
+    void handle_chunk(VDIChunk* chunk);
     void on_clipboard_grab();
     void on_clipboard_request(UINT format);
     void on_clipboard_release();
@@ -82,8 +99,6 @@ private:
                              DWORD mask, DWORD down_flag, DWORD up_flag);
     static HGLOBAL utf8_alloc(LPCSTR data, int size);
     static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
-    static VOID CALLBACK read_completion(DWORD err, DWORD bytes, LPOVERLAPPED overlap);
-    static VOID CALLBACK write_completion(DWORD err, DWORD bytes, LPOVERLAPPED overlap);
     static DWORD WINAPI event_thread_proc(LPVOID param);
     static void dispatch_message(VDAgentMessage* msg, uint32_t port);
     uint32_t get_clipboard_format(uint32_t type);
@@ -91,14 +106,14 @@ private:
     DWORD get_cximage_format(uint32_t type);
     enum { owner_none, owner_guest, owner_client };
     void set_clipboard_owner(int new_owner);
-    enum { CONTROL_STOP, CONTROL_DESKTOP_SWITCH };
+    enum { CONTROL_STOP, CONTROL_DESKTOP_SWITCH, CONTROL_LOGON };
     void set_control_event(int control_command);
     void handle_control_event();
-    VDPipeMessage* new_message(DWORD bytes = 0);
-    void enqueue_message(VDPipeMessage* msg);
+    VDIChunk* new_chunk(DWORD bytes = 0);
+    void enqueue_chunk(VDIChunk* msg);
     bool write_message(uint32_t type, uint32_t size, void* data);
     bool write_clipboard(VDAgentMessage* msg, uint32_t size);
-    bool connect_pipe();
+    bool init_vdi_port();
     bool send_input();
     void set_display_depth(uint32_t depth);
     void load_display_setting();
@@ -117,20 +132,20 @@ private:
     DWORD _input_time;
     HANDLE _control_event;
     HANDLE _clipboard_event;
+    HANDLE* _events;
     VDAgentMessage* _in_msg;
     uint32_t _in_msg_pos;
+    uint32_t _events_count;
     bool _pending_input;
-    bool _pending_write;
     bool _running;
     bool _desktop_switch;
     DesktopLayout* _desktop_layout;
     DisplaySetting _display_setting;
-    VDPipeState _pipe_state;
-    mutex_t _write_mutex;
+    VDIPort* _vdi_port;
     mutex_t _control_mutex;
     mutex_t _message_mutex;
     std::queue<int> _control_queue;
-    std::queue<VDPipeMessage*> _message_queue;
+    std::queue<VDIChunk*> _message_queue;
 
     bool _logon_desktop;
     bool _display_setting_initialized;
@@ -164,14 +179,16 @@ VDAgent::VDAgent()
     , _input_time (0)
     , _control_event (NULL)
     , _clipboard_event (NULL)
+    , _events (NULL)
     , _in_msg (NULL)
     , _in_msg_pos (0)
+    , _events_count (0)
     , _pending_input (false)
-    , _pending_write (false)
     , _running (false)
     , _desktop_switch (false)
     , _desktop_layout (NULL)
     , _display_setting (VD_AGENT_REGISTRY_KEY)
+    , _vdi_port (NULL)
     , _logon_desktop (false)
     , _display_setting_initialized (false)
     , _client_caps (NULL)
@@ -186,8 +203,6 @@ VDAgent::VDAgent()
         _log = VDLog::get(log_path);
     }
     ZeroMemory(&_input, sizeof(INPUT));
-    ZeroMemory(&_pipe_state, sizeof(VDPipeState));
-    MUTEX_INIT(_write_mutex);
     MUTEX_INIT(_control_mutex);
     MUTEX_INIT(_message_mutex);
 
@@ -196,6 +211,7 @@ VDAgent::VDAgent()
 
 VDAgent::~VDAgent()
 {
+    delete _events;
     delete _log;
     delete[] _client_caps;
 }
@@ -260,7 +276,8 @@ bool VDAgent::run()
     if (_desktop_layout->get_display_count() == 0) {
         vd_printf("No QXL devices!");
     }
-    if (!connect_pipe()) {
+    if (!init_vdi_port()) {
+        vd_printf("Failed to create VDIPort instance");
         cleanup();
         return false;
     }
@@ -272,7 +289,14 @@ bool VDAgent::run()
         return false;
     }
     send_announce_capabilities(true);
-    read_completion(0, 0, &_pipe_state.read.overlap);
+
+    _events_count = VD_STATIC_EVENTS_COUNT + _vdi_port->get_num_events();
+    _events = new HANDLE[_events_count];
+    ZeroMemory(_events, _events_count);
+    _events[VD_EVENT_CONTROL] = _control_event;
+    _vdi_port->fill_events(&_events[VD_STATIC_EVENTS_COUNT]);
+    vd_printf("Connected to server");
+
     while (_running) {
         input_desktop_message_loop();
         if (_clipboard_owner == owner_guest) {
@@ -289,7 +313,7 @@ void VDAgent::cleanup()
 {
     CloseHandle(_control_event);
     CloseHandle(_clipboard_event);
-    CloseHandle(_pipe_state.pipe);
+    delete _vdi_port;
     delete _desktop_layout;
 }
 
@@ -316,6 +340,17 @@ void VDAgent::handle_control_event()
             break;
         case CONTROL_DESKTOP_SWITCH:
             _desktop_switch = true;
+            break;
+        case CONTROL_LOGON:
+            vd_printf("session logon");
+            // loading the display settings for the current session's logged on user only
+            // after 1) we receive logon event, and 2) the desktop switched from Winlogon
+            if (!_logon_desktop) {
+                vd_printf("LOGON display setting");
+                _display_setting.load();
+            } else {
+                _logon_occured = true;
+            }
             break;
         default:
             vd_printf("Unsupported control command %u", control_command);
@@ -372,25 +407,57 @@ void VDAgent::input_desktop_message_loop()
         _running = false;
         return;
     }
+    if (!WTSRegisterSessionNotification(_hwnd, NOTIFY_FOR_ALL_SESSIONS)) {
+        vd_printf("WTSRegisterSessionNotification() failed: %lu", GetLastError());
+    }
     _hwnd_next_viewer = SetClipboardViewer(_hwnd);
     while (_running && !_desktop_switch) {
-        wait_ret = MsgWaitForMultipleObjectsEx(1, &_control_event, INFINITE, QS_ALLINPUT,
-                                               MWMO_ALERTABLE);
-        switch (wait_ret) {
-        case WAIT_OBJECT_0:
-            handle_control_event();
+        int cont_read = _vdi_port->read();
+        int cont_write = _vdi_port->write();
+        bool cont = false;
+
+        if (cont_read >= 0 && cont_write >= 0) {
+            cont = cont_read || cont_write;
+        } else if (cont_read == VDI_PORT_ERROR || cont_write == VDI_PORT_ERROR) {
+            vd_printf("VDI Port error, read %d write %d", cont_read, cont_write);
+            _running = false;
             break;
-        case WAIT_OBJECT_0 + 1:
+        } else if (cont_read == VDI_PORT_RESET || cont_write == VDI_PORT_RESET) {
+            vd_printf("VDI Port reset, read %d write %d", cont_read, cont_write);
+            _running = false;
+            break;
+        }
+        if (cont_read) {
+            handle_port_in();
+        }
+        if (cont_write) {
+            handle_port_out();
+        }
+
+        wait_ret = MsgWaitForMultipleObjectsEx(_events_count, _events, cont ? 0 : INFINITE,
+                                               QS_ALLINPUT, MWMO_ALERTABLE);
+        if (wait_ret == WAIT_OBJECT_0 + _events_count) {
             while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
                 TranslateMessage(&msg);
                 DispatchMessage(&msg);
             }
+            continue;
+        }
+        switch (wait_ret) {
+        case WAIT_OBJECT_0 + VD_EVENT_CONTROL:
+            handle_control_event();
             break;
         case WAIT_IO_COMPLETION:
-            break;
         case WAIT_TIMEOUT:
+            break;
         default:
-            vd_printf("MsgWaitForMultipleObjectsEx(): %lu", wait_ret);
+            DWORD vdi_event = wait_ret - VD_STATIC_EVENTS_COUNT - WAIT_OBJECT_0;
+            if (vdi_event >= 0 && vdi_event < _vdi_port->get_num_events()) {
+                _running = _vdi_port->handle_event(vdi_event);
+            } else {
+                vd_printf("MsgWaitForMultipleObjectsEx failed: %lu %lu", wait_ret, GetLastError());
+                _running = false;
+            }
         }
     }
     _desktop_switch = false;
@@ -399,6 +466,7 @@ void VDAgent::input_desktop_message_loop()
         _pending_input = false;
     }
     ChangeClipboardChain(_hwnd, _hwnd_next_viewer);
+    WTSUnRegisterSessionNotification(_hwnd);
     DestroyWindow(_hwnd);
     CloseDesktop(hdesk);
 }
@@ -512,7 +580,7 @@ bool VDAgent::handle_mouse_event(VDAgentMouseState* state)
 
 bool VDAgent::handle_mon_config(VDAgentMonitorsConfig* mon_config, uint32_t port)
 {
-    VDPipeMessage* reply_pipe_msg;
+    VDIChunk* reply_chunk;
     VDAgentMessage* reply_msg;
     VDAgentReply* reply;
     size_t display_count;
@@ -540,14 +608,13 @@ bool VDAgent::handle_mon_config(VDAgentMonitorsConfig* mon_config, uint32_t port
     }
 
     DWORD msg_size = VD_MESSAGE_HEADER_SIZE + sizeof(VDAgentReply);
-    reply_pipe_msg = new_message(msg_size);
-    if (!reply_pipe_msg) {
+    reply_chunk = new_chunk(msg_size);
+    if (!reply_chunk) {
         return false;
     }
-    reply_pipe_msg->type = VD_AGENT_COMMAND;
-    reply_pipe_msg->opaque = port;
-    reply_pipe_msg->size = sizeof(VDAgentMessage) + sizeof(VDAgentReply);
-    reply_msg = (VDAgentMessage*)reply_pipe_msg->data;
+    reply_chunk->hdr.port = port;
+    reply_chunk->hdr.size = sizeof(VDAgentMessage) + sizeof(VDAgentReply);
+    reply_msg = (VDAgentMessage*)reply_chunk->data;
     reply_msg->protocol = VD_AGENT_PROTOCOL;
     reply_msg->type = VD_AGENT_REPLY;
     reply_msg->opaque = 0;
@@ -555,7 +622,7 @@ bool VDAgent::handle_mon_config(VDAgentMonitorsConfig* mon_config, uint32_t port
     reply = (VDAgentReply*)reply_msg->data;
     reply->type = VD_AGENT_MONITORS_CONFIG;
     reply->error = display_count ? VD_AGENT_SUCCESS : VD_AGENT_ERROR;
-    enqueue_message(reply_pipe_msg);
+    enqueue_chunk(reply_chunk);
     return true;
 }
 
@@ -661,22 +728,21 @@ void VDAgent::load_display_setting()
 bool VDAgent::send_announce_capabilities(bool request)
 {
     DWORD msg_size;
-    VDPipeMessage* caps_pipe_msg;
+    VDIChunk* caps_chunk;
     VDAgentMessage* caps_msg;
     VDAgentAnnounceCapabilities* caps;
     uint32_t caps_size;
     uint32_t internal_msg_size = sizeof(VDAgentAnnounceCapabilities) + VD_AGENT_CAPS_BYTES;
 
     msg_size = VD_MESSAGE_HEADER_SIZE + internal_msg_size;
-    caps_pipe_msg = new_message(msg_size);
-    if (!caps_pipe_msg) {
+    caps_chunk = new_chunk(msg_size);
+    if (!caps_chunk) {
         return false;
     }
     caps_size = VD_AGENT_CAPS_SIZE;
-    caps_pipe_msg->type = VD_AGENT_COMMAND;
-    caps_pipe_msg->opaque = VDP_CLIENT_PORT;
-    caps_pipe_msg->size = sizeof(VDAgentMessage) + internal_msg_size;
-    caps_msg = (VDAgentMessage*)caps_pipe_msg->data;
+    caps_chunk->hdr.port = VDP_CLIENT_PORT;
+    caps_chunk->hdr.size = sizeof(VDAgentMessage) + internal_msg_size;
+    caps_msg = (VDAgentMessage*)caps_chunk->data;
     caps_msg->protocol = VD_AGENT_PROTOCOL;
     caps_msg->type = VD_AGENT_ANNOUNCE_CAPABILITIES;
     caps_msg->opaque = 0;
@@ -693,7 +759,7 @@ bool VDAgent::send_announce_capabilities(bool request)
     for (uint32_t i = 0 ; i < caps_size; ++i) {
         vd_printf("%X", caps->caps[i]);
     }
-    enqueue_message(caps_pipe_msg);
+    enqueue_chunk(caps_chunk);
     return true;
 }
 
@@ -722,7 +788,7 @@ bool VDAgent::handle_announce_capabilities(VDAgentAnnounceCapabilities* announce
 bool VDAgent::handle_display_config(VDAgentDisplayConfig* display_config, uint32_t port)
 {
     DisplaySettingOptions disp_setting_opts;
-    VDPipeMessage* reply_pipe_msg;
+    VDIChunk* reply_chunk;
     VDAgentMessage* reply_msg;
     VDAgentReply* reply;
     DWORD msg_size;
@@ -746,14 +812,13 @@ bool VDAgent::handle_display_config(VDAgentDisplayConfig* display_config, uint32
     }
 
     msg_size = VD_MESSAGE_HEADER_SIZE + sizeof(VDAgentReply);
-    reply_pipe_msg = new_message(msg_size);
-    if (!reply_pipe_msg) {
+    reply_chunk = new_chunk(msg_size);
+    if (!reply_chunk) {
         return false;
     }
-    reply_pipe_msg->type = VD_AGENT_COMMAND;
-    reply_pipe_msg->opaque = port;
-    reply_pipe_msg->size = sizeof(VDAgentMessage) + sizeof(VDAgentReply);
-    reply_msg = (VDAgentMessage*)reply_pipe_msg->data;
+    reply_chunk->hdr.port = port;
+    reply_chunk->hdr.size = sizeof(VDAgentMessage) + sizeof(VDAgentReply);
+    reply_msg = (VDAgentMessage*)reply_chunk->data;
     reply_msg->protocol = VD_AGENT_PROTOCOL;
     reply_msg->type = VD_AGENT_REPLY;
     reply_msg->opaque = 0;
@@ -761,50 +826,12 @@ bool VDAgent::handle_display_config(VDAgentDisplayConfig* display_config, uint32
     reply = (VDAgentReply*)reply_msg->data;
     reply->type = VD_AGENT_DISPLAY_CONFIG;
     reply->error = VD_AGENT_SUCCESS;
-    enqueue_message(reply_pipe_msg);
-    return true;
-}
-
-bool VDAgent::handle_control(VDPipeMessage* msg)
-{
-    switch (msg->type) {
-    case VD_AGENT_RESET: {
-        vd_printf("Agent reset");
-        VDPipeMessage* ack = new_message(sizeof(VDPipeMessage));
-        if (!ack) {
-            return false;
-        }
-        ack->type = VD_AGENT_RESET_ACK;
-        ack->opaque = msg->opaque;
-        enqueue_message(ack);
-        break;
-    }
-    case VD_AGENT_SESSION_LOGON:
-        vd_printf("session logon");
-        // loading the display settings for the current session's logged on user only
-        // after 1) we receive logon event, and 2) the desktop switched from Winlogon
-        if (!_logon_desktop) {
-            vd_printf("LOGON display setting");
-            _display_setting.load();
-        } else {
-            _logon_occured = true;
-        }
-        break;
-    case VD_AGENT_QUIT:
-        vd_printf("Agent quit");
-        _running = false;
-        break;
-    default:
-        vd_printf("Unsupported control %u", msg->type);
-        return false;
-    }
+    enqueue_chunk(reply_chunk);
     return true;
 }
 
 #define MIN(a, b) ((a) > (b) ? (b) : (a))
 
-//FIXME: division to max size chunks should NOT be here, but in the service
-//       here we should write the max possible size to the pipe
 bool VDAgent::write_clipboard(VDAgentMessage* msg, uint32_t size)
 {
     uint32_t pos = 0;
@@ -814,18 +841,17 @@ bool VDAgent::write_clipboard(VDAgentMessage* msg, uint32_t size)
     //FIXME: do it smarter - no loop, no memcopy
     MUTEX_LOCK(_message_mutex);
     while (pos < size) {
-        DWORD n = MIN(sizeof(VDPipeMessage) + size - pos, VD_AGENT_MAX_DATA_SIZE);
-        VDPipeMessage* pipe_msg = new_message(n);
-        if (!pipe_msg) {
+        DWORD n = MIN(sizeof(VDIChunk) + size - pos, VD_AGENT_MAX_DATA_SIZE);
+        VDIChunk* chunk = new_chunk(n);
+        if (!chunk) {
             ret = false;
             break;
         }
-        pipe_msg->type = VD_AGENT_COMMAND;
-        pipe_msg->opaque = VDP_CLIENT_PORT;
-        pipe_msg->size = n - sizeof(VDPipeMessage);
-        memcpy(pipe_msg->data, (char*)msg + pos, n - sizeof(VDPipeMessage));
-        enqueue_message(pipe_msg);
-        pos += (n - sizeof(VDPipeMessage));
+        chunk->hdr.port = VDP_CLIENT_PORT;
+        chunk->hdr.size = n - sizeof(VDIChunk);
+        memcpy(chunk->data, (char*)msg + pos, n - sizeof(VDIChunk));
+        enqueue_chunk(chunk);
+        pos += (n - sizeof(VDIChunk));
     }
     MUTEX_UNLOCK(_message_mutex);
     return ret;
@@ -833,17 +859,16 @@ bool VDAgent::write_clipboard(VDAgentMessage* msg, uint32_t size)
 
 bool VDAgent::write_message(uint32_t type, uint32_t size = 0, void* data = NULL)
 {
-    VDPipeMessage* pipe_msg;
+    VDIChunk* chunk;
     VDAgentMessage* msg;
 
-    pipe_msg = new_message(VD_MESSAGE_HEADER_SIZE + size);
-    if (!pipe_msg) {
+    chunk = new_chunk(VD_MESSAGE_HEADER_SIZE + size);
+    if (!chunk) {
         return false;
     }
-    pipe_msg->type = VD_AGENT_COMMAND;
-    pipe_msg->opaque = VDP_CLIENT_PORT;
-    pipe_msg->size = sizeof(VDAgentMessage) + size;
-    msg = (VDAgentMessage*)pipe_msg->data;
+    chunk->hdr.port = VDP_CLIENT_PORT;
+    chunk->hdr.size = sizeof(VDAgentMessage) + size;
+    msg = (VDAgentMessage*)chunk->data;
     msg->protocol = VD_AGENT_PROTOCOL;
     msg->type = type;
     msg->opaque = 0;
@@ -851,7 +876,7 @@ bool VDAgent::write_message(uint32_t type, uint32_t size = 0, void* data = NULL)
     if (size && data) {
         memcpy(msg->data, data, size);
     }
-    enqueue_message(pipe_msg);
+    enqueue_chunk(chunk);
     return true;
 }
 
@@ -1119,32 +1144,29 @@ void VDAgent::set_clipboard_owner(int new_owner)
     _clipboard_owner = new_owner;
 }
 
-bool VDAgent::connect_pipe()
+VDIPort *create_virtio_vdi_port()
 {
-    VDAgent* a = _singleton;
-    HANDLE pipe;
+    return new VirtioVDIPort();
+}
 
-    ZeroMemory(&a->_pipe_state, sizeof(VDPipeState));
-    if (!WaitNamedPipe(VD_SERVICE_PIPE_NAME, NMPWAIT_USE_DEFAULT_WAIT)) {
-        vd_printf("WaitNamedPipe() failed: %lu", GetLastError());
-        return false;
+VDIPort *create_pci_vdi_port()
+{
+    return new PCIVDIPort();
+}
+
+bool VDAgent::init_vdi_port()
+{
+    VDIPort* (*creators[])(void) = { create_virtio_vdi_port, create_pci_vdi_port };
+
+    for (unsigned int i = 0 ; i < sizeof(creators)/sizeof(creators[0]); ++i) {
+        _vdi_port = creators[i]();
+        if (_vdi_port->init()) {
+            return true;
+        }
+        delete _vdi_port;
     }
-    //assuming vdservice created the named pipe before creating this vdagent process
-    pipe = CreateFile(VD_SERVICE_PIPE_NAME, GENERIC_READ | GENERIC_WRITE,
-                      0, NULL, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, NULL);
-    if (pipe == INVALID_HANDLE_VALUE) {
-        vd_printf("CreateFile() failed: %lu", GetLastError());
-        return false;
-    }
-    DWORD pipe_mode = PIPE_READMODE_MESSAGE | PIPE_WAIT;
-    if (!SetNamedPipeHandleState(pipe, &pipe_mode, NULL, NULL)) {
-        vd_printf("SetNamedPipeHandleState() failed: %lu", GetLastError());
-        CloseHandle(pipe);
-        return false;
-    }
-    a->_pipe_state.pipe = pipe;
-    vd_printf("Connected to service pipe");
-    return true;
+    _vdi_port = NULL;
+    return false;
 }
 
 void VDAgent::dispatch_message(VDAgentMessage* msg, uint32_t port)
@@ -1190,143 +1212,105 @@ void VDAgent::dispatch_message(VDAgentMessage* msg, uint32_t port)
     }
 }
 
-VOID CALLBACK VDAgent::read_completion(DWORD err, DWORD bytes, LPOVERLAPPED overlap)
+void VDAgent::handle_port_in()
 {
-    VDAgent* a = _singleton;
-    VDPipeState* ps = &a->_pipe_state;
-    DWORD len;
+    static char buf[sizeof(VDIChunk) + VD_AGENT_MAX_DATA_SIZE] = {0, };
+    VDIChunk* chunk = (VDIChunk*)buf;
+    uint32_t chunk_size;
 
-    if (!a->_running) {
-        return;
-    }
-    if (err) {
-        vd_printf("vdservice disconnected (%lu)", err);
-        a->_running = false;
-        return;
-    }
-    ps->read.end += bytes;
-    while (a->_running && (len = ps->read.end - ps->read.start) >= sizeof(VDPipeMessage)) {
-        VDPipeMessage* pipe_msg = (VDPipeMessage*)&ps->read.data[ps->read.start];
-
-        if (pipe_msg->type != VD_AGENT_COMMAND) {
-            a->handle_control(pipe_msg);
-            ps->read.start += sizeof(VDPipeMessage);
-            continue;
+    while (_running)  {
+        if (!chunk->hdr.size && _vdi_port->read_ring_size() >= sizeof(VDIChunk)) {
+            if (_vdi_port->ring_read(chunk, sizeof(VDIChunk)) != sizeof(VDIChunk)) {
+                vd_printf("ring_read of chunk header failed");
+                _running = false;
+                break;
+            }
+            if (sizeof(VDIChunk) + chunk->hdr.size > sizeof(buf)) {
+                vd_printf("chunk is too large, size %u port %u", chunk->hdr.size, chunk->hdr.port);
+                _running = false;
+                break;
+            }
         }
-        if (len < sizeof(VDPipeMessage) + pipe_msg->size) {
+        chunk_size = chunk->hdr.size;
+        if (!chunk_size || _vdi_port->read_ring_size() < chunk_size) {
             break;
         }
-
-        //FIXME: currently assumes that multi-part msg arrives only from client port
-        if (a->_in_msg_pos == 0 || pipe_msg->opaque == VDP_SERVER_PORT) {
-            if (len < VD_MESSAGE_HEADER_SIZE) {
-                break;
-            }
-            VDAgentMessage* msg = (VDAgentMessage*)pipe_msg->data;
-            if (msg->protocol != VD_AGENT_PROTOCOL) {
-                vd_printf("Invalid protocol %u bytes %lu", msg->protocol, bytes);
-                a->_running = false;
-                break;
-            }
-            uint32_t msg_size = sizeof(VDAgentMessage) + msg->size;
-            if (pipe_msg->size == msg_size) {
-                dispatch_message(msg, pipe_msg->opaque);
-            } else {
-                ASSERT(pipe_msg->size < msg_size);
-                a->_in_msg = (VDAgentMessage*)new uint8_t[msg_size];
-                memcpy(a->_in_msg, pipe_msg->data, pipe_msg->size);
-                a->_in_msg_pos = pipe_msg->size;
-            }
-        } else {
-            memcpy((uint8_t*)a->_in_msg + a->_in_msg_pos, pipe_msg->data, pipe_msg->size);
-            a->_in_msg_pos += pipe_msg->size;
-            if (a->_in_msg_pos == sizeof(VDAgentMessage) + a->_in_msg->size) {
-                dispatch_message(a->_in_msg, 0);
-                a->_in_msg_pos = 0;
-                delete[] (uint8_t *)a->_in_msg;
-                a->_in_msg = NULL;
-            }
+        if (_vdi_port->ring_read(chunk->data, chunk_size) != chunk_size) {
+            vd_printf("ring_read of chunk data failed");
+            _running = false;
+            break;
         }
-
-        ps->read.start += (sizeof(VDPipeMessage) + pipe_msg->size);
-        if (ps->read.start == ps->read.end) {
-            ps->read.start = ps->read.end = 0;
-        }
-    }
-    if (a->_running && ps->read.end < sizeof(ps->read.data) &&
-        !ReadFileEx(ps->pipe, ps->read.data + ps->read.end, sizeof(ps->read.data) - ps->read.end,
-                    overlap, read_completion)) {
-        vd_printf("ReadFileEx() failed: %lu", GetLastError());
-        a->_running = false;
-    }
+        handle_chunk(chunk);
+        chunk->hdr.size = 0;
+   }
 }
 
-VOID CALLBACK VDAgent::write_completion(DWORD err, DWORD bytes, LPOVERLAPPED overlap)
+void VDAgent::handle_chunk(VDIChunk* chunk)
 {
-    VDAgent* a = _singleton;
-    VDPipeState* ps = &a->_pipe_state;
-    DWORD size_left;
-
-    if (!a->_running) {
-        return;
-    }
-    if (err) {
-        vd_printf("vdservice disconnected (%lu)", err);
-        a->_running = false;
-        return;
-    }
-    MUTEX_LOCK(a->_write_mutex);
-    ps->write.start += bytes;
-    if (ps->write.start == ps->write.end) {
-        ps->write.start = ps->write.end = 0;
-    }
-
-    MUTEX_LOCK(a->_message_mutex);
-    size_left = sizeof(a->_pipe_state.write.data) - a->_pipe_state.write.end;
-    while (!a->_message_queue.empty()) {
-        VDPipeMessage* msg = a->_message_queue.front();
-        DWORD size = sizeof(VDPipeMessage) + msg->size;
-
-        if (size > size_left) {
-            break;
+    //FIXME: currently assumes that multi-part msg arrives only from client port
+    if (_in_msg_pos == 0 || chunk->hdr.port == VDP_SERVER_PORT) {
+        if (chunk->hdr.size < sizeof(VDAgentMessage)) {
+            return;
         }
-        a->_message_queue.pop();
-        memcpy(a->_pipe_state.write.data + a->_pipe_state.write.end, msg, size);
-        a->_pipe_state.write.end += size;
-        size_left -= size;
-        delete msg;
-    }
-    MUTEX_UNLOCK(a->_message_mutex);
-
-    if (ps->write.start < ps->write.end) {
-        if (WriteFileEx(ps->pipe, ps->write.data + ps->write.start,
-                               ps->write.end - ps->write.start, overlap, write_completion)) {
-            a->_pending_write = true;
+        VDAgentMessage* msg = (VDAgentMessage*)chunk->data;
+        if (msg->protocol != VD_AGENT_PROTOCOL) {
+            vd_printf("Invalid protocol %u", msg->protocol);
+            _running = false;
+            return;
+        }
+        uint32_t msg_size = sizeof(VDAgentMessage) + msg->size;
+        if (chunk->hdr.size == msg_size) {
+            dispatch_message(msg, chunk->hdr.port);
         } else {
-            vd_printf("WriteFileEx() failed: %lu", GetLastError());
-            a->_running = false;
+            ASSERT(chunk->hdr.size < msg_size);
+            _in_msg = (VDAgentMessage*)new uint8_t[msg_size];
+            memcpy(_in_msg, chunk->data, chunk->hdr.size);
+            _in_msg_pos = chunk->hdr.size;
         }
     } else {
-        a->_pending_write = false;
+        memcpy((uint8_t*)_in_msg + _in_msg_pos, chunk->data, chunk->hdr.size);
+        _in_msg_pos += chunk->hdr.size;
+        if (_in_msg_pos == sizeof(VDAgentMessage) + _in_msg->size) {
+            dispatch_message(_in_msg, 0);
+            _in_msg_pos = 0;
+            delete[] (uint8_t *)_in_msg;
+            _in_msg = NULL;
+        }
     }
-    MUTEX_UNLOCK(a->_write_mutex);
 }
 
-VDPipeMessage* VDAgent::new_message(DWORD bytes)
-{
-    return (VDPipeMessage*)(new char[bytes]);
-}
-
-void VDAgent::enqueue_message(VDPipeMessage* msg)
+void VDAgent::handle_port_out()
 {
     MUTEX_LOCK(_message_mutex);
-    _message_queue.push(msg);
-    MUTEX_UNLOCK(_message_mutex);
-    MUTEX_LOCK(_write_mutex);
-    if (!_pending_write) {
-        write_completion(0, 0, &_pipe_state.write.overlap);
+    while (_running && !_message_queue.empty()) {
+        VDIChunk* chunk = _message_queue.front();
+        DWORD size = sizeof(VDIChunk) + chunk->hdr.size;
+
+        if (size > _vdi_port->write_ring_free_space()) {
+            break;
+        }
+        _message_queue.pop();
+        if (_vdi_port->ring_write(chunk, size) != size) {
+            vd_printf("ring_write failed");
+            _running = false;
+            return;
+        }
+        delete chunk;
     }
-    MUTEX_UNLOCK(_write_mutex);
+    MUTEX_UNLOCK(_message_mutex);
+}
+
+VDIChunk* VDAgent::new_chunk(DWORD bytes)
+{
+    return (VDIChunk*)(new char[bytes]);
+}
+
+void VDAgent::enqueue_chunk(VDIChunk* chunk)
+{
+    MUTEX_LOCK(_message_mutex);
+    _message_queue.push(chunk);
+    MUTEX_UNLOCK(_message_mutex);
+    handle_port_out();
 }
 
 LRESULT CALLBACK VDAgent::wnd_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
@@ -1367,6 +1351,11 @@ LRESULT CALLBACK VDAgent::wnd_proc(HWND hwnd, UINT message, WPARAM wparam, LPARA
                 a->set_clipboard_owner(owner_none);
             }
             a->set_control_event(CONTROL_STOP);
+        }
+        break;
+    case WM_WTSSESSION_CHANGE:
+        if (wparam == WTS_SESSION_LOGON) {
+            a->set_control_event(CONTROL_LOGON);
         }
         break;
     default:
