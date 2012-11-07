@@ -80,6 +80,7 @@ public:
 private:
     VDAgent();
     void input_desktop_message_loop();
+    void event_dispatcher(DWORD timeout, DWORD wake_mask);
     bool handle_mouse_event(VDAgentMouseState* state);
     bool handle_announce_capabilities(VDAgentAnnounceCapabilities* announce_capabilities,
                                       uint32_t msg_size);
@@ -362,9 +363,7 @@ void VDAgent::handle_control_event()
 void VDAgent::input_desktop_message_loop()
 {
     TCHAR desktop_name[MAX_PATH];
-    DWORD wait_ret;
     HDESK hdesk;
-    MSG msg;
 
     hdesk = OpenInputDesktop(0, FALSE, GENERIC_ALL);
     if (!hdesk) {
@@ -412,53 +411,7 @@ void VDAgent::input_desktop_message_loop()
     }
     _hwnd_next_viewer = SetClipboardViewer(_hwnd);
     while (_running && !_desktop_switch) {
-        int cont_read = _vdi_port->read();
-        int cont_write = _vdi_port->write();
-        bool cont = false;
-
-        if (cont_read >= 0 && cont_write >= 0) {
-            cont = cont_read || cont_write;
-        } else if (cont_read == VDI_PORT_ERROR || cont_write == VDI_PORT_ERROR) {
-            vd_printf("VDI Port error, read %d write %d", cont_read, cont_write);
-            _running = false;
-            break;
-        } else if (cont_read == VDI_PORT_RESET || cont_write == VDI_PORT_RESET) {
-            vd_printf("VDI Port reset, read %d write %d", cont_read, cont_write);
-            _running = false;
-            break;
-        }
-        if (cont_read) {
-            handle_port_in();
-        }
-        if (cont_write) {
-            handle_port_out();
-        }
-
-        wait_ret = MsgWaitForMultipleObjectsEx(_events_count, _events, cont ? 0 : INFINITE,
-                                               QS_ALLINPUT, MWMO_ALERTABLE);
-        if (wait_ret == WAIT_OBJECT_0 + _events_count) {
-            while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-                TranslateMessage(&msg);
-                DispatchMessage(&msg);
-            }
-            continue;
-        }
-        switch (wait_ret) {
-        case WAIT_OBJECT_0 + VD_EVENT_CONTROL:
-            handle_control_event();
-            break;
-        case WAIT_IO_COMPLETION:
-        case WAIT_TIMEOUT:
-            break;
-        default:
-            DWORD vdi_event = wait_ret - VD_STATIC_EVENTS_COUNT - WAIT_OBJECT_0;
-            if (vdi_event >= 0 && vdi_event < _vdi_port->get_num_events()) {
-                _running = _vdi_port->handle_event(vdi_event);
-            } else {
-                vd_printf("MsgWaitForMultipleObjectsEx failed: %lu %lu", wait_ret, GetLastError());
-                _running = false;
-            }
-        }
+        event_dispatcher(INFINITE, QS_ALLINPUT);
     }
     _desktop_switch = false;
     if (_pending_input) {
@@ -469,6 +422,60 @@ void VDAgent::input_desktop_message_loop()
     WTSUnRegisterSessionNotification(_hwnd);
     DestroyWindow(_hwnd);
     CloseDesktop(hdesk);
+}
+
+void VDAgent::event_dispatcher(DWORD timeout, DWORD wake_mask)
+{
+    DWORD wait_ret;
+    MSG msg;
+
+    int cont_read = _vdi_port->read();
+    int cont_write = _vdi_port->write();
+    bool cont = false;
+
+    if (cont_read >= 0 && cont_write >= 0) {
+        cont = cont_read || cont_write;
+    } else if (cont_read == VDI_PORT_ERROR || cont_write == VDI_PORT_ERROR) {
+        vd_printf("VDI Port error, read %d write %d", cont_read, cont_write);
+        _running = false;
+        return;
+    } else if (cont_read == VDI_PORT_RESET || cont_write == VDI_PORT_RESET) {
+        vd_printf("VDI Port reset, read %d write %d", cont_read, cont_write);
+        _running = false;
+        return;
+    }
+    if (cont_read) {
+        handle_port_in();
+    }
+    if (cont_write) {
+        handle_port_out();
+    }
+
+    wait_ret = MsgWaitForMultipleObjects(_events_count, _events, FALSE, cont ? 0 : timeout,
+                                         wake_mask);
+
+    if (wake_mask && wait_ret == WAIT_OBJECT_0 + _events_count) {
+        while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
+        return;
+    }
+    switch (wait_ret) {
+    case WAIT_OBJECT_0 + VD_EVENT_CONTROL:
+        handle_control_event();
+        break;
+    case WAIT_TIMEOUT:
+        break;
+    default:
+        DWORD vdi_event = wait_ret - VD_STATIC_EVENTS_COUNT - WAIT_OBJECT_0;
+        if (vdi_event >= 0 && vdi_event < _vdi_port->get_num_events()) {
+            _running = _vdi_port->handle_event(vdi_event);
+        } else {
+            vd_printf("MsgWaitForMultipleObjectsEx failed: %lu %lu", wait_ret, GetLastError());
+            _running = false;
+        }
+    }
 }
 
 DWORD VDAgent::get_buttons_change(DWORD last_buttons_state, DWORD new_buttons_state,
