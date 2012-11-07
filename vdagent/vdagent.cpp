@@ -32,7 +32,7 @@
 #define VD_AGENT_WINCLASS_NAME  TEXT("VDAGENT")
 #define VD_INPUT_INTERVAL_MS    20
 #define VD_TIMER_ID             1
-#define VD_CLIPBOARD_TIMEOUT_MS 10000
+#define VD_CLIPBOARD_TIMEOUT_MS 3000
 #define VD_CLIPBOARD_FORMAT_MAX_TYPES 16
 
 //FIXME: extract format/type stuff to win_vdagent_common for use by windows\platform.cpp as well
@@ -107,7 +107,7 @@ private:
     DWORD get_cximage_format(uint32_t type);
     enum { owner_none, owner_guest, owner_client };
     void set_clipboard_owner(int new_owner);
-    enum { CONTROL_STOP, CONTROL_DESKTOP_SWITCH, CONTROL_LOGON };
+    enum { CONTROL_STOP, CONTROL_DESKTOP_SWITCH, CONTROL_LOGON, CONTROL_CLIPBOARD };
     void set_control_event(int control_command);
     void handle_control_event();
     VDIChunk* new_chunk(DWORD bytes = 0);
@@ -119,6 +119,7 @@ private:
     void set_display_depth(uint32_t depth);
     void load_display_setting();
     bool send_announce_capabilities(bool request);
+    void cleanup_in_msg();
     void cleanup();
 
 private:
@@ -126,13 +127,13 @@ private:
     HWND _hwnd;
     HWND _hwnd_next_viewer;
     int _clipboard_owner;
+    DWORD _clipboard_tick;
     DWORD _buttons_state;
     ULONG _mouse_x;
     ULONG _mouse_y;
     INPUT _input;
     DWORD _input_time;
     HANDLE _control_event;
-    HANDLE _clipboard_event;
     HANDLE* _events;
     VDAgentMessage* _in_msg;
     uint32_t _in_msg_pos;
@@ -174,12 +175,12 @@ VDAgent::VDAgent()
     : _hwnd (NULL)
     , _hwnd_next_viewer (NULL)
     , _clipboard_owner (owner_none)
+    , _clipboard_tick (0)
     , _buttons_state (0)
     , _mouse_x (0)
     , _mouse_y (0)
     , _input_time (0)
     , _control_event (NULL)
-    , _clipboard_event (NULL)
     , _events (NULL)
     , _in_msg (NULL)
     , _in_msg_pos (0)
@@ -259,8 +260,7 @@ bool VDAgent::run()
         vd_printf("SetProcessShutdownParameters failed %lu", GetLastError());
     }
     _control_event = CreateEvent(NULL, FALSE, FALSE, NULL);
-    _clipboard_event = CreateEvent(NULL, FALSE, FALSE, NULL);
-    if (!_control_event || !_clipboard_event) {
+    if (!_control_event) {
         vd_printf("CreateEvent() failed: %lu", GetLastError());
         cleanup();
         return false;
@@ -313,7 +313,6 @@ bool VDAgent::run()
 void VDAgent::cleanup()
 {
     CloseHandle(_control_event);
-    CloseHandle(_clipboard_event);
     delete _vdi_port;
     delete _desktop_layout;
 }
@@ -352,6 +351,9 @@ void VDAgent::handle_control_event()
             } else {
                 _logon_occured = true;
             }
+            break;
+        case CONTROL_CLIPBOARD:
+            _clipboard_tick = 0;
             break;
         default:
             vd_printf("Unsupported control command %u", control_command);
@@ -641,11 +643,11 @@ bool VDAgent::handle_clipboard(VDAgentClipboard* clipboard, uint32_t size)
 
     if (_clipboard_owner != owner_client) {
         vd_printf("Received clipboard data from client while clipboard is not owned by client");
-        SetEvent(_clipboard_event);
+        set_control_event(CONTROL_CLIPBOARD);
         return false;
     }
     if (clipboard->type == VD_AGENT_CLIPBOARD_NONE) {
-        SetEvent(_clipboard_event);
+        set_control_event(CONTROL_CLIPBOARD);
         return false;
     }
     switch (clipboard->type) {
@@ -666,7 +668,7 @@ bool VDAgent::handle_clipboard(VDAgentClipboard* clipboard, uint32_t size)
     }
     format = get_clipboard_format(clipboard->type);
     if (SetClipboardData(format, clip_data)) {
-        SetEvent(_clipboard_event);
+        set_control_event(CONTROL_CLIPBOARD);
         return true;
     }
     // We retry clipboard open-empty-set-close only when there is a timeout in on_clipboard_request()
@@ -942,26 +944,16 @@ void VDAgent::on_clipboard_request(UINT format)
         return;
     }
 
-    // next clipboard event will be considered a reply to this request
-    ResetEvent(_clipboard_event);
+    _clipboard_tick = GetTickCount();
+    while (_running && _clipboard_tick &&
+           GetTickCount() < _clipboard_tick + VD_CLIPBOARD_TIMEOUT_MS) {
+        event_dispatcher(VD_CLIPBOARD_TIMEOUT_MS, 0);
+    }
 
-    DWORD start_tick = GetTickCount();
-    do {
-        DWORD wait_result = WaitForSingleObjectEx(_clipboard_event, 1000, TRUE);
-
-        switch (wait_result) {
-        case WAIT_OBJECT_0:
-            return;
-        case WAIT_IO_COMPLETION:
-        case WAIT_TIMEOUT:
-            break;
-        default:
-            vd_printf("Wait error (%lu)\n", GetLastError());
-            return;
-        }
-    } while (GetTickCount() < start_tick + VD_CLIPBOARD_TIMEOUT_MS);
-
-    vd_printf("wait timeout.. ");
+    cleanup_in_msg();
+    if (_clipboard_tick) {
+        vd_printf("Clipboard wait timeout");
+    }
 }
 
 void VDAgent::on_clipboard_release()
@@ -1096,7 +1088,7 @@ void VDAgent::handle_clipboard_release()
         vd_printf("Received clipboard release from client while clipboard is not owned by client");
         return;
     }
-    SetEvent(_clipboard_event);
+    set_control_event(CONTROL_CLIPBOARD);
     set_clipboard_owner(owner_none);
 }
 
@@ -1277,13 +1269,22 @@ void VDAgent::handle_chunk(VDIChunk* chunk)
     } else {
         memcpy((uint8_t*)_in_msg + _in_msg_pos, chunk->data, chunk->hdr.size);
         _in_msg_pos += chunk->hdr.size;
+        // update clipboard tick on each clipboard chunk for timeout setting
+        if (_in_msg->type == VD_AGENT_CLIPBOARD) {
+            _clipboard_tick = GetTickCount();
+        }
         if (_in_msg_pos == sizeof(VDAgentMessage) + _in_msg->size) {
             dispatch_message(_in_msg, 0);
-            _in_msg_pos = 0;
-            delete[] (uint8_t *)_in_msg;
-            _in_msg = NULL;
+            cleanup_in_msg();
         }
     }
+}
+
+void VDAgent::cleanup_in_msg()
+{
+    _in_msg_pos = 0;
+    delete[] (uint8_t *)_in_msg;
+    _in_msg = NULL;
 }
 
 void VDAgent::handle_port_out()
