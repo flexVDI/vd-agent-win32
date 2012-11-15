@@ -20,7 +20,7 @@ LIBS = -lversion
 
 bin_PROGRAMS = vdagent vdservice
 
-vdagent_LDADD = $(CXIMAGE_LIBS) vdagent_rc.$(OBJEXT)
+vdagent_LDADD = -lwtsapi32 $(CXIMAGE_LIBS) vdagent_rc.$(OBJEXT)
 vdagent_CXXFLAGS = $(AM_CXXFLAGS) $(CXIMAGE_CFLAGS)
 vdagent_LDFLAGS = $(AM_LDFLAGS) -Wl,--subsystem,windows
 vdagent_SOURCES =			\
@@ -31,7 +31,13 @@ vdagent_SOURCES =			\
 	vdagent/desktop_layout.h	\
 	vdagent/display_setting.cpp	\
 	vdagent/display_setting.h	\
+	vdagent/pci_vdi_port.cpp	\
+	vdagent/pci_vdi_port.h		\
 	vdagent/vdagent.cpp		\
+	vdagent/vdi_port.cpp		\
+	vdagent/vdi_port.h		\
+	vdagent/virtio_vdi_port.cpp	\
+	vdagent/virtio_vdi_port.h	\
 	$(NULL)
 
 vdagent_rc.$(OBJEXT): vdagent/vdagent.rc
@@ -45,13 +51,7 @@ vdservice_SOURCES =			\
 	common/vdcommon.h		\
 	common/vdlog.cpp		\
 	common/vdlog.h			\
-	vdservice/pci_vdi_port.cpp	\
-	vdservice/pci_vdi_port.h	\
-	vdservice/vdi_port.cpp		\
-	vdservice/vdi_port.h		\
 	vdservice/vdservice.cpp		\
-	vdservice/virtio_vdi_port.cpp	\
-	vdservice/virtio_vdi_port.h	\
 	$(NULL)
 
 vdservice_rc.$(OBJEXT): vdservice/vdservice.rc
