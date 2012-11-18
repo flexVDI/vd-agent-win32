@@ -1301,7 +1301,6 @@ void VDAgent::handle_port_out()
         if (_vdi_port->ring_write(chunk, size) != size) {
             vd_printf("ring_write failed");
             _running = false;
-            return;
         }
         delete chunk;
     }
