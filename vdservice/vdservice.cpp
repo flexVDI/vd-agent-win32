@@ -121,7 +121,7 @@ VDService* VDService::get()
 enum SystemVersion {
     SYS_VER_UNSUPPORTED,
     SYS_VER_WIN_XP_CLASS, // also Server 2003/R2
-    SYS_VER_WIN_7_CLASS,  // also Server 2008/R2 & Vista
+    SYS_VER_WIN_7_CLASS,  // also Windows 8, Server 2012, Server 2008/R2 & Vista
 };
 
 int supported_system_version()
@@ -136,7 +136,7 @@ int supported_system_version()
     }
     if (osvi.dwMajorVersion == 5 && (osvi.dwMinorVersion == 1 || osvi.dwMinorVersion == 2)) {
         return SYS_VER_WIN_XP_CLASS;
-    } else if (osvi.dwMajorVersion == 6 && (osvi.dwMinorVersion == 0 || osvi.dwMinorVersion == 1)) {
+    } else if (osvi.dwMajorVersion == 6 && osvi.dwMinorVersion >= 0 && osvi.dwMinorVersion <= 2) {
         return SYS_VER_WIN_7_CLASS;
     }
     return 0;
