@@ -640,6 +640,13 @@ BOOL create_session_process_as_user(IN DWORD session_id, IN BOOL use_default_tok
         ret = proc_ret.ret_value;
         if (ret) {
             *process_information = proc_ret.process_information;
+            if (process_information->hProcess == 0) {
+                process_information->hProcess = OpenProcess(SYNCHRONIZE | PROCESS_TERMINATE, FALSE,
+                                                            process_information->dwProcessId);
+                if (!process_information->hProcess) {
+                    vd_printf("OpenProcess() failed %lu", GetLastError());
+                }
+            }
         } else {
             SetLastError(proc_ret.last_error);
         }
