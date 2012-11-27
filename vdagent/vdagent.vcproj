@@ -350,23 +350,11 @@
 				>
 			</File>
 			<File
-				RelativePath=".\pci_vdi_port.cpp"
-				>
-			</File>
-			<File
 				RelativePath=".\vdagent.cpp"
 				>
 			</File>
 			<File
-				RelativePath=".\vdi_port.cpp"
-				>
-			</File>
-			<File
 				RelativePath="..\common\vdlog.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\virtio_vdi_port.cpp"
 				>
 			</File>
 		</Filter>
@@ -384,10 +372,6 @@
 				>
 			</File>
 			<File
-				RelativePath=".\pci_vdi_port.h"
-				>
-			</File>
-			<File
 				RelativePath=".\resource.h"
 				>
 			</File>
@@ -396,15 +380,7 @@
 				>
 			</File>
 			<File
-				RelativePath=".\vdi_port.h"
-				>
-			</File>
-			<File
 				RelativePath="..\common\vdlog.h"
-				>
-			</File>
-			<File
-				RelativePath=".\virtio_vdi_port.h"
 				>
 			</File>
 		</Filter>
