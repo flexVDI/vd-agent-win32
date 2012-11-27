@@ -16,8 +16,6 @@
 */
 
 #include "vdcommon.h"
-#include "virtio_vdi_port.h"
-#include "pci_vdi_port.h"
 #include "desktop_layout.h"
 #include "display_setting.h"
 #include "ximage.h"
@@ -65,11 +63,7 @@ typedef struct ALIGN_VC VDIChunk {
 } ALIGN_GCC VDIChunk;
 
 #define VD_MESSAGE_HEADER_SIZE (sizeof(VDIChunk) + sizeof(VDAgentMessage))
-
-enum {
-    VD_EVENT_CONTROL = 0,
-    VD_STATIC_EVENTS_COUNT // Must be last
-};
+#define VD_READ_BUF_SIZE       (sizeof(VDIChunk) + VD_AGENT_MAX_DATA_SIZE)
 
 class VDAgent {
 public:
@@ -90,8 +84,6 @@ private:
     bool handle_clipboard_request(VDAgentClipboardRequest* clipboard_request);
     void handle_clipboard_release();
     bool handle_display_config(VDAgentDisplayConfig* display_config, uint32_t port);
-    void handle_port_in();
-    void handle_port_out();
     void handle_chunk(VDIChunk* chunk);
     void on_clipboard_grab();
     void on_clipboard_request(UINT format);
@@ -101,7 +93,9 @@ private:
     static HGLOBAL utf8_alloc(LPCSTR data, int size);
     static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
     static DWORD WINAPI event_thread_proc(LPVOID param);
-    static void dispatch_message(VDAgentMessage* msg, uint32_t port);
+    static VOID CALLBACK read_completion(DWORD err, DWORD bytes, LPOVERLAPPED overlapped);
+    static VOID CALLBACK write_completion(DWORD err, DWORD bytes, LPOVERLAPPED overlapped);
+    void dispatch_message(VDAgentMessage* msg, uint32_t port);
     uint32_t get_clipboard_format(uint32_t type);
     uint32_t get_clipboard_type(uint32_t format);
     DWORD get_cximage_format(uint32_t type);
@@ -114,7 +108,7 @@ private:
     void enqueue_chunk(VDIChunk* msg);
     bool write_message(uint32_t type, uint32_t size, void* data);
     bool write_clipboard(VDAgentMessage* msg, uint32_t size);
-    bool init_vdi_port();
+    bool init_vio_serial();
     bool send_input();
     void set_display_depth(uint32_t depth);
     void load_display_setting();
@@ -134,16 +128,19 @@ private:
     INPUT _input;
     DWORD _input_time;
     HANDLE _control_event;
-    HANDLE* _events;
     VDAgentMessage* _in_msg;
     uint32_t _in_msg_pos;
-    uint32_t _events_count;
     bool _pending_input;
     bool _running;
     bool _desktop_switch;
     DesktopLayout* _desktop_layout;
     DisplaySetting _display_setting;
-    VDIPort* _vdi_port;
+    HANDLE _vio_serial;
+    OVERLAPPED _read_overlapped;
+    OVERLAPPED _write_overlapped;
+    CHAR _read_buf[VD_READ_BUF_SIZE];
+    DWORD _read_pos;
+    DWORD _write_pos;
     mutex_t _control_mutex;
     mutex_t _message_mutex;
     std::queue<int> _control_queue;
@@ -163,6 +160,8 @@ private:
 
 VDAgent* VDAgent::_singleton = NULL;
 
+#define VIOSERIAL_PORT_PATH L"\\\\.\\Global\\com.redhat.spice.0"
+
 VDAgent* VDAgent::get()
 {
     if (!_singleton) {
@@ -181,16 +180,16 @@ VDAgent::VDAgent()
     , _mouse_y (0)
     , _input_time (0)
     , _control_event (NULL)
-    , _events (NULL)
     , _in_msg (NULL)
     , _in_msg_pos (0)
-    , _events_count (0)
     , _pending_input (false)
     , _running (false)
     , _desktop_switch (false)
     , _desktop_layout (NULL)
     , _display_setting (VD_AGENT_REGISTRY_KEY)
-    , _vdi_port (NULL)
+    , _vio_serial (NULL)
+    , _read_pos (0)
+    , _write_pos (0)
     , _logon_desktop (false)
     , _display_setting_initialized (false)
     , _client_caps (NULL)
@@ -204,7 +203,10 @@ VDAgent::VDAgent()
         swprintf_s(log_path, MAX_PATH, VD_AGENT_LOG_PATH, temp_path);
         _log = VDLog::get(log_path);
     }
-    ZeroMemory(&_input, sizeof(INPUT));
+    ZeroMemory(&_input, sizeof(_input));
+    ZeroMemory(&_read_overlapped, sizeof(_read_overlapped));
+    ZeroMemory(&_write_overlapped, sizeof(_write_overlapped));
+    ZeroMemory(_read_buf, sizeof(_read_buf));
     MUTEX_INIT(_control_mutex);
     MUTEX_INIT(_message_mutex);
 
@@ -213,7 +215,6 @@ VDAgent::VDAgent()
 
 VDAgent::~VDAgent()
 {
-    delete _events;
     delete _log;
     delete[] _client_caps;
 }
@@ -277,8 +278,13 @@ bool VDAgent::run()
     if (_desktop_layout->get_display_count() == 0) {
         vd_printf("No QXL devices!");
     }
-    if (!init_vdi_port()) {
-        vd_printf("Failed to create VDIPort instance");
+    if (!init_vio_serial()) {
+        cleanup();
+        return false;
+    }
+    if (!ReadFileEx(_vio_serial, _read_buf, sizeof(VDIChunk), &_read_overlapped, read_completion) &&
+            GetLastError() != ERROR_IO_PENDING) {
+        vd_printf("vio_serial read error %lu", GetLastError());
         cleanup();
         return false;
     }
@@ -290,12 +296,6 @@ bool VDAgent::run()
         return false;
     }
     send_announce_capabilities(true);
-
-    _events_count = VD_STATIC_EVENTS_COUNT + _vdi_port->get_num_events();
-    _events = new HANDLE[_events_count];
-    ZeroMemory(_events, _events_count);
-    _events[VD_EVENT_CONTROL] = _control_event;
-    _vdi_port->fill_events(&_events[VD_STATIC_EVENTS_COUNT]);
     vd_printf("Connected to server");
 
     while (_running) {
@@ -313,7 +313,7 @@ bool VDAgent::run()
 void VDAgent::cleanup()
 {
     CloseHandle(_control_event);
-    delete _vdi_port;
+    CloseHandle(_vio_serial);
     delete _desktop_layout;
 }
 
@@ -431,52 +431,23 @@ void VDAgent::event_dispatcher(DWORD timeout, DWORD wake_mask)
     DWORD wait_ret;
     MSG msg;
 
-    int cont_read = _vdi_port->read();
-    int cont_write = _vdi_port->write();
-    bool cont = false;
-
-    if (cont_read >= 0 && cont_write >= 0) {
-        cont = cont_read || cont_write;
-    } else if (cont_read == VDI_PORT_ERROR || cont_write == VDI_PORT_ERROR) {
-        vd_printf("VDI Port error, read %d write %d", cont_read, cont_write);
-        _running = false;
-        return;
-    } else if (cont_read == VDI_PORT_RESET || cont_write == VDI_PORT_RESET) {
-        vd_printf("VDI Port reset, read %d write %d", cont_read, cont_write);
-        _running = false;
-        return;
-    }
-    if (cont_read) {
-        handle_port_in();
-    }
-    if (cont_write) {
-        handle_port_out();
-    }
-
-    wait_ret = MsgWaitForMultipleObjects(_events_count, _events, FALSE, cont ? 0 : timeout,
-                                         wake_mask);
-
-    if (wake_mask && wait_ret == WAIT_OBJECT_0 + _events_count) {
+    wait_ret = MsgWaitForMultipleObjectsEx(1, &_control_event, timeout, wake_mask, MWMO_ALERTABLE);
+    switch (wait_ret) {
+    case WAIT_OBJECT_0:
+        handle_control_event();
+        break;
+    case WAIT_OBJECT_0 + 1:
         while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
             TranslateMessage(&msg);
             DispatchMessage(&msg);
         }
-        return;
-    }
-    switch (wait_ret) {
-    case WAIT_OBJECT_0 + VD_EVENT_CONTROL:
-        handle_control_event();
         break;
+    case WAIT_IO_COMPLETION:
     case WAIT_TIMEOUT:
         break;
     default:
-        DWORD vdi_event = wait_ret - VD_STATIC_EVENTS_COUNT - WAIT_OBJECT_0;
-        if (vdi_event >= 0 && vdi_event < _vdi_port->get_num_events()) {
-            _running = _vdi_port->handle_event(vdi_event);
-        } else {
-            vd_printf("MsgWaitForMultipleObjectsEx failed: %lu %lu", wait_ret, GetLastError());
-            _running = false;
-        }
+        vd_printf("MsgWaitForMultipleObjectsEx failed: %lu %lu", wait_ret, GetLastError());
+        _running = false;
     }
 }
 
@@ -1145,29 +1116,15 @@ void VDAgent::set_clipboard_owner(int new_owner)
     _clipboard_owner = new_owner;
 }
 
-VDIPort *create_virtio_vdi_port()
+bool VDAgent::init_vio_serial()
 {
-    return new VirtioVDIPort();
-}
-
-VDIPort *create_pci_vdi_port()
-{
-    return new PCIVDIPort();
-}
-
-bool VDAgent::init_vdi_port()
-{
-    VDIPort* (*creators[])(void) = { create_virtio_vdi_port, create_pci_vdi_port };
-
-    for (unsigned int i = 0 ; i < sizeof(creators)/sizeof(creators[0]); ++i) {
-        _vdi_port = creators[i]();
-        if (_vdi_port->init()) {
-            return true;
-        }
-        delete _vdi_port;
+    _vio_serial = CreateFile(VIOSERIAL_PORT_PATH, GENERIC_READ | GENERIC_WRITE , 0, NULL,
+                             OPEN_EXISTING, FILE_FLAG_OVERLAPPED, NULL);
+    if (_vio_serial == INVALID_HANDLE_VALUE) {
+        vd_printf("Failed opening %ls, error %u", VIOSERIAL_PORT_PATH, GetLastError());
+        return false;
     }
-    _vdi_port = NULL;
-    return false;
+    return true;
 }
 
 void VDAgent::dispatch_message(VDAgentMessage* msg, uint32_t port)
@@ -1213,37 +1170,42 @@ void VDAgent::dispatch_message(VDAgentMessage* msg, uint32_t port)
     }
 }
 
-void VDAgent::handle_port_in()
+VOID VDAgent::read_completion(DWORD err, DWORD bytes, LPOVERLAPPED overlapped)
 {
-    static char buf[sizeof(VDIChunk) + VD_AGENT_MAX_DATA_SIZE] = {0, };
-    VDIChunk* chunk = (VDIChunk*)buf;
-    uint32_t chunk_size;
+    VDAgent* a = _singleton;
+    VDIChunk* chunk = (VDIChunk*)a->_read_buf;
+    DWORD count;
 
-    while (_running)  {
-        if (!chunk->hdr.size && _vdi_port->read_ring_size() >= sizeof(VDIChunk)) {
-            if (_vdi_port->ring_read(chunk, sizeof(VDIChunk)) != sizeof(VDIChunk)) {
-                vd_printf("ring_read of chunk header failed");
-                _running = false;
-                break;
-            }
-            if (sizeof(VDIChunk) + chunk->hdr.size > sizeof(buf)) {
-                vd_printf("chunk is too large, size %u port %u", chunk->hdr.size, chunk->hdr.port);
-                _running = false;
-                break;
-            }
+    if (err != 0 && err != ERROR_OPERATION_ABORTED && err != ERROR_NO_SYSTEM_RESOURCES) {
+        vd_printf("vio_serial read completion error %lu", err);
+        a->_running = false;
+        return;
+    }
+
+    a->_read_pos += bytes;
+    if (a->_read_pos < sizeof(VDIChunk)) {
+        count = sizeof(VDIChunk) - a->_read_pos;
+    } else if (a->_read_pos == sizeof(VDIChunk)) {
+        count = chunk->hdr.size;
+        if (a->_read_pos + count > sizeof(a->_read_buf)) {
+            vd_printf("chunk is too large, size %u port %u", chunk->hdr.size, chunk->hdr.port);
+            a->_running = false;
+            return;
         }
-        chunk_size = chunk->hdr.size;
-        if (!chunk_size || _vdi_port->read_ring_size() < chunk_size) {
-            break;
-        }
-        if (_vdi_port->ring_read(chunk->data, chunk_size) != chunk_size) {
-            vd_printf("ring_read of chunk data failed");
-            _running = false;
-            break;
-        }
-        handle_chunk(chunk);
-        chunk->hdr.size = 0;
-   }
+    } else if (a->_read_pos == sizeof(VDIChunk) + chunk->hdr.size){
+        a->handle_chunk(chunk);
+        count = sizeof(VDIChunk);
+        a->_read_pos = 0;
+    } else {
+        ASSERT(a->_read_pos < sizeof(VDIChunk) + chunk->hdr.size);
+        count = sizeof(VDIChunk) + chunk->hdr.size - a->_read_pos;
+    }
+
+    if (!ReadFileEx(a->_vio_serial, a->_read_buf + a->_read_pos, count, overlapped,
+                    read_completion) && GetLastError() != ERROR_IO_PENDING) {
+        vd_printf("vio_serial read error %lu", GetLastError());
+        a->_running = false;
+    }
 }
 
 void VDAgent::handle_chunk(VDIChunk* chunk)
@@ -1289,24 +1251,39 @@ void VDAgent::cleanup_in_msg()
     _in_msg = NULL;
 }
 
-void VDAgent::handle_port_out()
+void VDAgent::write_completion(DWORD err, DWORD bytes, LPOVERLAPPED overlapped)
 {
-    MUTEX_LOCK(_message_mutex);
-    while (_running && !_message_queue.empty()) {
-        VDIChunk* chunk = _message_queue.front();
-        DWORD size = sizeof(VDIChunk) + chunk->hdr.size;
+    VDAgent* a = _singleton;
+    VDIChunk* chunk;
+    DWORD count;
 
-        if (size > _vdi_port->write_ring_free_space()) {
-            break;
-        }
-        _message_queue.pop();
-        if (_vdi_port->ring_write(chunk, size) != size) {
-            vd_printf("ring_write failed");
-            _running = false;
-        }
-        delete chunk;
+    ASSERT(!a->_message_queue.empty());
+    if (err != 0) {
+        vd_printf("vio_serial write completion error %lu", err);
+        a->_running = false;
+        return;
     }
-    MUTEX_UNLOCK(_message_mutex);
+    MUTEX_LOCK(a->_message_mutex);
+    a->_write_pos += bytes;
+    chunk = a->_message_queue.front();
+    count = sizeof(VDIChunk) + chunk->hdr.size - a->_write_pos;
+    if (count == 0) {
+        a->_message_queue.pop();
+        a->_write_pos = 0;
+        delete chunk;
+        if (!a->_message_queue.empty()) {
+            chunk = a->_message_queue.front();
+            count = sizeof(VDIChunk) + chunk->hdr.size;
+        }
+    }
+    if (count) {
+        if (!WriteFileEx(a->_vio_serial, (char*)chunk + a->_write_pos, count, overlapped,
+                         write_completion) && GetLastError() != ERROR_IO_PENDING) {
+            vd_printf("vio_serial write error %lu", GetLastError());
+            a->_running = false;
+        }
+    }
+    MUTEX_UNLOCK(a->_message_mutex);
 }
 
 VDIChunk* VDAgent::new_chunk(DWORD bytes)
@@ -1318,8 +1295,10 @@ void VDAgent::enqueue_chunk(VDIChunk* chunk)
 {
     MUTEX_LOCK(_message_mutex);
     _message_queue.push(chunk);
+    if (_message_queue.size() == 1) {
+        write_completion(0, 0, &_write_overlapped);
+    }
     MUTEX_UNLOCK(_message_mutex);
-    handle_port_out();
 }
 
 LRESULT CALLBACK VDAgent::wnd_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
