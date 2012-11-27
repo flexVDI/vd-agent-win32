@@ -643,12 +643,10 @@ bool VDAgent::handle_clipboard(VDAgentClipboard* clipboard, uint32_t size)
 
     if (_clipboard_owner != owner_client) {
         vd_printf("Received clipboard data from client while clipboard is not owned by client");
-        set_control_event(CONTROL_CLIPBOARD);
-        return false;
+        goto fin;
     }
     if (clipboard->type == VD_AGENT_CLIPBOARD_NONE) {
-        set_control_event(CONTROL_CLIPBOARD);
-        return false;
+        goto fin;
     }
     switch (clipboard->type) {
     case VD_AGENT_CLIPBOARD_UTF8_TEXT:
@@ -664,20 +662,24 @@ bool VDAgent::handle_clipboard(VDAgentClipboard* clipboard, uint32_t size)
     }
     default:
         vd_printf("Unsupported clipboard type %u", clipboard->type);
-        return true;
+        goto fin;
     }
     format = get_clipboard_format(clipboard->type);
-    if (SetClipboardData(format, clip_data)) {
-        set_control_event(CONTROL_CLIPBOARD);
-        return true;
+    if (format == 0) {
+        vd_printf("Unknown clipboard format, type %u", clipboard->type);
+        goto fin;
     }
-    // We retry clipboard open-empty-set-close only when there is a timeout in on_clipboard_request()
-    if (!OpenClipboard(_hwnd)) {
-        return false;
-    }
-    EmptyClipboard();
     ret = !!SetClipboardData(format, clip_data);
-    CloseClipboard();
+    if (!ret) {
+        DWORD err = GetLastError();
+        if (err == ERROR_NOT_ENOUGH_MEMORY) {
+            vd_printf("Not enough memory to set clipboard data, size %u bytes", size);
+        } else {
+            vd_printf("SetClipboardData failed: %u", err);
+        }
+    }
+fin:
+    set_control_event(CONTROL_CLIPBOARD);
     return ret;
 }
 
