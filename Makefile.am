@@ -31,13 +31,7 @@ vdagent_SOURCES =			\
 	vdagent/desktop_layout.h	\
 	vdagent/display_setting.cpp	\
 	vdagent/display_setting.h	\
-	vdagent/pci_vdi_port.cpp	\
-	vdagent/pci_vdi_port.h		\
 	vdagent/vdagent.cpp		\
-	vdagent/vdi_port.cpp		\
-	vdagent/vdi_port.h		\
-	vdagent/virtio_vdi_port.cpp	\
-	vdagent/virtio_vdi_port.h	\
 	$(NULL)
 
 vdagent_rc.$(OBJEXT): vdagent/vdagent.rc
