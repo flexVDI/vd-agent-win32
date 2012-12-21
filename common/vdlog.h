@@ -25,6 +25,8 @@
 #include <time.h>
 #include <sys/timeb.h>
 
+#include "vdcommon.h"
+
 class VDLog {
 public:
     ~VDLog();
@@ -57,19 +59,6 @@ static unsigned int log_level = LOG_INFO;
     printf("%lu::%s::%s,%.3d::%s::" format "\n", GetCurrentThreadId(), type, datetime, ms, \
            __FUNCTION__, ## __VA_ARGS__);
 
-#ifdef OLDMSVCRT
-#define LOG(type, format, ...) do {                                     \
-    if (type >= log_level && type <= LOG_FATAL) {                       \
-        VDLog* log = VDLog::get();                                      \
-        const char *type_as_char[] = { "DEBUG", "INFO", "WARN", "ERROR", "FATAL" }; \
-        if (log) {                                                      \
-            log->PRINT_LINE(type_as_char[type], format, "", 0, ## __VA_ARGS__); \
-        } else {                                                        \
-            PRINT_LINE(type_as_char[type], format, "", 0, ## __VA_ARGS__); \
-        }                                                               \
-    }                                                                   \
-} while(0)
-#else
 #define LOG(type, format, ...) do {                                     \
     if (type >= log_level && type <= LOG_FATAL) {                       \
         VDLog* log = VDLog::get();                                      \
@@ -87,7 +76,6 @@ static unsigned int log_level = LOG_INFO;
         }                                                               \
     }                                                                   \
 } while(0)
-#endif
 
 
 #define vd_printf(format, ...) LOG(LOG_INFO, format, ## __VA_ARGS__)

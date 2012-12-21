@@ -46,5 +46,9 @@ typedef CRITICAL_SECTION mutex_t;
 #define swprintf_s(buf, sz, format...) swprintf(buf, format)
 #endif
 
+#ifdef OLDMSVCRT
+#define _ftime_s(timeb) _ftime(timeb)
+#endif
+
 #endif
 
