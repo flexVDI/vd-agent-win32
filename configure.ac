@@ -74,6 +74,7 @@ dnl ---------------------------------------------------------------------------
 AC_CONFIG_SUBDIRS([spice-protocol])
 AC_CONFIG_FILES([
 Makefile
+mingw-spice-vdagent.spec
 ])
 AC_OUTPUT
 

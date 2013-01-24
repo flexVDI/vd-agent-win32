@@ -3,7 +3,7 @@
 #define _version_suffix -e198
 
 Name:           mingw-spice-vdagent
-Version:        0.7.0
+Version:        @VERSION@
 Release:        1%{?dist}%{?extra_release}
 Summary:        MinGW Windows SPICE guest agent
 
@@ -90,5 +90,3 @@ Features:
 %defattr(-,root,root)
 %{mingw64_bindir}/vdagent.exe
 %{mingw64_bindir}/vdservice.exe
-
-%changelog
