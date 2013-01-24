@@ -71,6 +71,7 @@ Features:
 %prep
 %setup -q -n vdagent-win-%{version}%{?_version_suffix}
 
+%{mingw_debug_package}
 
 %build
 %mingw_configure
