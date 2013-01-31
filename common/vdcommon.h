@@ -33,6 +33,7 @@ typedef CRITICAL_SECTION mutex_t;
 #define MUTEX_UNLOCK(mutex) LeaveCriticalSection(&mutex)
 
 #define VD_AGENT_REGISTRY_KEY "SOFTWARE\\Red Hat\\Spice\\vdagent\\"
+#define VD_AGENT_STOP_EVENT   TEXT("Global\\vdagent_stop_event")
 
 #if defined __GNUC__
 #define ALIGN_GCC __attribute__ ((packed))

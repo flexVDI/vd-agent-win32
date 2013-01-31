@@ -128,6 +128,7 @@ private:
     INPUT _input;
     DWORD _input_time;
     HANDLE _control_event;
+    HANDLE _stop_event;
     VDAgentMessage* _in_msg;
     uint32_t _in_msg_pos;
     bool _pending_input;
@@ -180,6 +181,7 @@ VDAgent::VDAgent()
     , _mouse_y (0)
     , _input_time (0)
     , _control_event (NULL)
+    , _stop_event (NULL)
     , _in_msg (NULL)
     , _in_msg_pos (0)
     , _pending_input (false)
@@ -266,6 +268,12 @@ bool VDAgent::run()
         cleanup();
         return false;
     }
+    _stop_event = OpenEvent(SYNCHRONIZE, FALSE, VD_AGENT_STOP_EVENT);
+    if (!_stop_event) {
+        vd_printf("OpenEvent() failed: %lu", GetLastError());
+        cleanup();
+        return false;
+    }
     memset(&wcls, 0, sizeof(wcls));
     wcls.lpfnWndProc = &VDAgent::wnd_proc;
     wcls.lpszClassName = VD_AGENT_WINCLASS_NAME;
@@ -312,6 +320,7 @@ bool VDAgent::run()
 
 void VDAgent::cleanup()
 {
+    CloseHandle(_stop_event);
     CloseHandle(_control_event);
     CloseHandle(_vio_serial);
     delete _desktop_layout;
@@ -428,15 +437,20 @@ void VDAgent::input_desktop_message_loop()
 
 void VDAgent::event_dispatcher(DWORD timeout, DWORD wake_mask)
 {
+    HANDLE events[] = {_control_event, _stop_event};    
+    const DWORD event_count = sizeof(events) / sizeof(events[0]);
     DWORD wait_ret;
     MSG msg;
 
-    wait_ret = MsgWaitForMultipleObjectsEx(1, &_control_event, timeout, wake_mask, MWMO_ALERTABLE);
+    wait_ret = MsgWaitForMultipleObjectsEx(event_count, events, timeout, wake_mask, MWMO_ALERTABLE);
     switch (wait_ret) {
     case WAIT_OBJECT_0:
         handle_control_event();
         break;
     case WAIT_OBJECT_0 + 1:
+        _running = false;
+        break;
+    case WAIT_OBJECT_0 + event_count:
         while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
             TranslateMessage(&msg);
             DispatchMessage(&msg);

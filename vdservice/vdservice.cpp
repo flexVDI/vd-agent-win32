@@ -92,6 +92,7 @@ private:
     SERVICE_STATUS_HANDLE _status_handle;
     PROCESS_INFORMATION _agent_proc_info;
     HANDLE _control_event;
+    HANDLE _agent_stop_event;
     HANDLE* _events;
     TCHAR _agent_path[MAX_PATH];
     VDControlQueue _control_queue;
@@ -157,6 +158,7 @@ VDService::VDService()
     ZeroMemory(&_agent_proc_info, sizeof(_agent_proc_info));
     _system_version = supported_system_version();
     _control_event = CreateEvent(NULL, FALSE, FALSE, NULL);
+    _agent_stop_event = CreateEvent(NULL, FALSE, FALSE, VD_AGENT_STOP_EVENT);
     _agent_path[0] = wchar_t('\0');
     MUTEX_INIT(_agent_mutex);
     MUTEX_INIT(_control_mutex);
@@ -165,6 +167,7 @@ VDService::VDService()
 
 VDService::~VDService()
 {
+    CloseHandle(_agent_stop_event);
     CloseHandle(_control_event);
     delete _events;
     delete _log;
@@ -777,7 +780,7 @@ bool VDService::kill_agent()
     _agent_alive = false;
     proc_handle = _agent_proc_info.hProcess;
     _agent_proc_info.hProcess = 0;
-    TerminateProcess(proc_handle, 0);
+    SetEvent(_agent_stop_event);
     if (GetProcessId(proc_handle)) {
         wait_ret = WaitForSingleObject(proc_handle, VD_AGENT_TIMEOUT);
         switch (wait_ret) {
