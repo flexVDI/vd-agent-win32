@@ -801,6 +801,7 @@ bool VDService::kill_agent()
             break;
         }
     }
+    ResetEvent(_agent_stop_event);
     CloseHandle(proc_handle);
     CloseHandle(_agent_proc_info.hThread);
     ZeroMemory(&_agent_proc_info, sizeof(_agent_proc_info));
