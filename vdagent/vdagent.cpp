@@ -42,7 +42,7 @@ typedef struct VDClipboardFormat {
 VDClipboardFormat clipboard_formats[] = {
     {CF_UNICODETEXT, {VD_AGENT_CLIPBOARD_UTF8_TEXT, 0}},
     //FIXME: support more image types
-    {CF_DIB, {VD_AGENT_CLIPBOARD_IMAGE_PNG, VD_AGENT_CLIPBOARD_IMAGE_BMP, 0}},
+    {CF_BITMAP, {VD_AGENT_CLIPBOARD_IMAGE_PNG, VD_AGENT_CLIPBOARD_IMAGE_BMP, 0}},
 };
 
 #define clipboard_formats_count (sizeof(clipboard_formats) / sizeof(clipboard_formats[0]))
@@ -1025,8 +1025,13 @@ bool VDAgent::handle_clipboard_request(VDAgentClipboardRequest* clipboard_reques
     case VD_AGENT_CLIPBOARD_IMAGE_PNG:
     case VD_AGENT_CLIPBOARD_IMAGE_BMP: {
         DWORD cximage_format = get_cximage_format(clipboard_request->type);
+        HPALETTE pal = 0;
+
         ASSERT(cximage_format);
-        if (!image.CreateFromHANDLE(clip_data)) {
+        if (IsClipboardFormatAvailable(CF_PALETTE)) {
+            pal = (HPALETTE)GetClipboardData(CF_PALETTE);
+        }
+        if (!image.CreateFromHBITMAP((HBITMAP)clip_data, pal)) {
             vd_printf("Image create from handle failed");
             break;
         }
