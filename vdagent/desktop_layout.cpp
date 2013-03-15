@@ -243,6 +243,7 @@ bool DesktopLayout::init_dev_mode(LPCTSTR dev_name, DEVMODE* dev_mode, DisplayMo
     DWORD best = -1;
     QXLEscapeSetCustomDisplay custom;
     HDC hdc = NULL;
+    LONG ret;
 
     ZeroMemory(dev_mode, sizeof(DEVMODE));
     dev_mode->dmSize = sizeof(DEVMODE);
@@ -251,6 +252,11 @@ bool DesktopLayout::init_dev_mode(LPCTSTR dev_name, DEVMODE* dev_mode, DisplayMo
         dev_mode->dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_POSITION;
         return true;
     }
+
+    // attach
+    EnumDisplaySettings(dev_name, ENUM_CURRENT_SETTINGS, dev_mode);
+    ret = ChangeDisplaySettingsEx(dev_name, dev_mode, NULL, CDS_UPDATEREGISTRY, NULL);
+    vd_printf("attach %d", ret);
 
     // Update custom resolution
     custom.xres = mode->_width;
