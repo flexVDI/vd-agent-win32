@@ -42,7 +42,7 @@ typedef struct VDClipboardFormat {
 VDClipboardFormat clipboard_formats[] = {
     {CF_UNICODETEXT, {VD_AGENT_CLIPBOARD_UTF8_TEXT, 0}},
     //FIXME: support more image types
-    {CF_BITMAP, {VD_AGENT_CLIPBOARD_IMAGE_PNG, VD_AGENT_CLIPBOARD_IMAGE_BMP, 0}},
+    {CF_DIB, {VD_AGENT_CLIPBOARD_IMAGE_PNG, VD_AGENT_CLIPBOARD_IMAGE_BMP, 0}},
 };
 
 #define clipboard_formats_count (sizeof(clipboard_formats) / sizeof(clipboard_formats[0]))
@@ -1007,6 +1007,10 @@ bool VDAgent::handle_clipboard_request(VDAgentClipboardRequest* clipboard_reques
     if (!(format = get_clipboard_format(clipboard_request->type))) {
         vd_printf("Unsupported clipboard type %u", clipboard_request->type);
         return false;
+    }
+    // on encoding only, we use HBITMAP to keep the correct palette
+    if (format == CF_DIB) {
+        format = CF_BITMAP;
     }
     if (!IsClipboardFormatAvailable(format) || !OpenClipboard(_hwnd)) {
         return false;
