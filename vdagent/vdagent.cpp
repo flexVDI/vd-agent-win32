@@ -914,11 +914,14 @@ bool VDAgent::write_message(uint32_t type, uint32_t size = 0, void* data = NULL)
 
 void VDAgent::on_clipboard_grab()
 {
-    uint32_t* types = new uint32_t[clipboard_formats_count * VD_CLIPBOARD_FORMAT_MAX_TYPES];
+    uint32_t types[clipboard_formats_count * VD_CLIPBOARD_FORMAT_MAX_TYPES];
     int count = 0;
 
     if (!VD_AGENT_HAS_CAPABILITY(_client_caps, _client_caps_size,
                                  VD_AGENT_CAP_CLIPBOARD_BY_DEMAND)) {
+        return;
+    }
+    if (CountClipboardFormats() == 0) {
         return;
     }
     for (unsigned int i = 0; i < clipboard_formats_count; i++) {
@@ -932,9 +935,11 @@ void VDAgent::on_clipboard_grab()
         write_message(VD_AGENT_CLIPBOARD_GRAB, count * sizeof(types[0]), types);
         set_clipboard_owner(owner_guest);
     } else {
-        vd_printf("Unsupported clipboard format");       
+        UINT format = 0;
+        while (format = EnumClipboardFormats(format)) {
+            vd_printf("Unsupported clipboard format %u", format);
+        }
     }  
-    delete[] types;
 }
 
 // In delayed rendering, Windows requires us to SetClipboardData before we return from
