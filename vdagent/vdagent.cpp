@@ -295,11 +295,6 @@ bool VDAgent::run()
         return false;
     }
     _stop_event = OpenEvent(SYNCHRONIZE, FALSE, VD_AGENT_STOP_EVENT);
-    if (!_stop_event) {
-        vd_printf("OpenEvent() failed: %lu", GetLastError());
-        cleanup();
-        return false;
-    }
     memset(&wcls, 0, sizeof(wcls));
     wcls.lpfnWndProc = &VDAgent::wnd_proc;
     wcls.lpszClassName = VD_AGENT_WINCLASS_NAME;
@@ -472,24 +467,25 @@ void VDAgent::input_desktop_message_loop()
 
 void VDAgent::event_dispatcher(DWORD timeout, DWORD wake_mask)
 {
-    HANDLE events[] = {_control_event, _stop_event};    
-    const DWORD event_count = sizeof(events) / sizeof(events[0]);
+    HANDLE events[] = {_control_event, _stop_event};
+    DWORD event_count = _stop_event ? 2 : 1;
     DWORD wait_ret;
     MSG msg;
 
     wait_ret = MsgWaitForMultipleObjectsEx(event_count, events, timeout, wake_mask, MWMO_ALERTABLE);
+    if (wait_ret == WAIT_OBJECT_0 + event_count) {
+        while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
+        return;
+    }
     switch (wait_ret) {
     case WAIT_OBJECT_0:
         handle_control_event();
         break;
     case WAIT_OBJECT_0 + 1:
         _running = false;
-        break;
-    case WAIT_OBJECT_0 + event_count:
-        while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
-        }
         break;
     case WAIT_IO_COMPLETION:
     case WAIT_TIMEOUT:
