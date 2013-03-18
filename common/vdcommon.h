@@ -34,6 +34,7 @@ typedef CRITICAL_SECTION mutex_t;
 
 #define VD_AGENT_REGISTRY_KEY "SOFTWARE\\Red Hat\\Spice\\vdagent\\"
 #define VD_AGENT_STOP_EVENT   TEXT("Global\\vdagent_stop_event")
+#define VD_AGENT_NAMED_PIPE   TEXT("\\\\.\\pipe\\vdagent")
 
 #if defined __GNUC__
 #define ALIGN_GCC __attribute__ ((packed))

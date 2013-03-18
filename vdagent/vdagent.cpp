@@ -111,6 +111,7 @@ private:
     bool write_message(uint32_t type, uint32_t size, void* data);
     bool write_clipboard(VDAgentMessage* msg, uint32_t size);
     bool init_vio_serial();
+    bool launch_helper();
     bool send_input();
     void set_display_depth(uint32_t depth);
     void load_display_setting();
@@ -133,6 +134,7 @@ private:
     ULONG _mouse_y;
     INPUT _input;
     DWORD _input_time;
+    HANDLE _helper_pipe;
     HANDLE _control_event;
     HANDLE _stop_event;
     VDAgentMessage* _in_msg;
@@ -189,6 +191,7 @@ VDAgent::VDAgent()
     , _mouse_x (0)
     , _mouse_y (0)
     , _input_time (0)
+    , _helper_pipe (NULL)
     , _control_event (NULL)
     , _stop_event (NULL)
     , _in_msg (NULL)
@@ -287,6 +290,10 @@ bool VDAgent::run()
             cleanup();
             return false;
         }
+        if (!launch_helper()) {
+            cleanup();
+            return false;
+        }
     }
     _control_event = CreateEvent(NULL, FALSE, FALSE, NULL);
     if (!_control_event) {
@@ -342,6 +349,7 @@ bool VDAgent::run()
 void VDAgent::cleanup()
 {
     FreeLibrary(_user_lib);
+    CloseHandle(_helper_pipe);
     CloseHandle(_stop_event);
     CloseHandle(_control_event);
     CloseHandle(_vio_serial);
@@ -391,6 +399,37 @@ void VDAgent::handle_control_event()
         }
     }
     MUTEX_UNLOCK(_control_mutex);
+}
+
+bool VDAgent::launch_helper()
+{
+    HINSTANCE helper;
+    TCHAR helper_path[MAX_PATH];
+    TCHAR* slash;
+
+    if (!GetModuleFileName(NULL, helper_path, MAX_PATH) ||
+              !(slash = wcsrchr(helper_path, TCHAR('\\')))) {
+        vd_printf("Cannot get file path: %lu", GetLastError());
+    }
+    wcscpy(slash + 1, L"vdagent_helper.exe");
+    helper = ShellExecute(NULL, L"runas", helper_path, NULL, NULL, SW_HIDE);
+    if (helper <= (HINSTANCE)32) {
+        vd_printf("ShellExecute: %lu", helper);
+        return false;
+    }
+    _helper_pipe = CreateNamedPipe(VD_AGENT_NAMED_PIPE, PIPE_ACCESS_OUTBOUND,
+                                   PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+                                   1, 1024, 1024, 0, NULL);
+    if (_helper_pipe == INVALID_HANDLE_VALUE) {
+        vd_printf("CreateNamedPipe() failed: %lu", GetLastError());
+        return false;
+    }
+    if (!ConnectNamedPipe(_helper_pipe, NULL) && GetLastError() != ERROR_PIPE_CONNECTED) {
+        vd_printf("ConnectNamedPipe() failed: %lu", GetLastError());
+        CloseHandle(_helper_pipe);
+        return false;
+    }
+    return true;
 }
 
 void VDAgent::input_desktop_message_loop()
@@ -511,6 +550,8 @@ DWORD VDAgent::get_buttons_change(DWORD last_buttons_state, DWORD new_buttons_st
 bool VDAgent::send_input()
 {
     bool ret = true;
+    DWORD bytes;
+
     _desktop_layout->lock();
     if (_pending_input) {
         if (KillTimer(_hwnd, VD_TIMER_ID)) {
@@ -522,7 +563,14 @@ bool VDAgent::send_input()
             return false;
         }
     }
-    if (!SendInput(1, &_input, sizeof(INPUT))) {
+
+    if (_system_version == SYS_VER_WIN_7_CLASS) {
+        if (!WriteFile(_helper_pipe, &_input, sizeof(_input), &bytes, NULL) ||
+                sizeof(_input) != bytes) {
+            vd_printf("Write to pipe failed: %lu", GetLastError());
+            ret = _running = false;
+        }
+    } else if (!SendInput(1, &_input, sizeof(INPUT))) {
         DWORD err = GetLastError();
         // Don't stop agent due to UIPI blocking, which is usually only for specific windows
         // of system security applications (anti-viruses etc.)
@@ -531,6 +579,7 @@ bool VDAgent::send_input()
             ret = _running = false;
         }
     }
+
     _input_time = GetTickCount();
     _desktop_layout->unlock();
     return ret;

@@ -5,6 +5,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "vdagent", "vdagent\vdagent.
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "vdservice", "vdservice\vdservice.vcproj", "{ADFE5E22-31D0-4343-AE9E-8102CC0051F9}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "vdagent_helper", "vdagent_helper\vdagent_helper.vcproj", "{3E459EA7-0252-48E0-A92B-13A66F5F370B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Win32 = Debug|Win32
@@ -29,6 +31,14 @@ Global
 		{ADFE5E22-31D0-4343-AE9E-8102CC0051F9}.Release|Win32.Build.0 = Release|Win32
 		{ADFE5E22-31D0-4343-AE9E-8102CC0051F9}.Release|x64.ActiveCfg = Release|x64
 		{ADFE5E22-31D0-4343-AE9E-8102CC0051F9}.Release|x64.Build.0 = Release|x64
+		{3E459EA7-0252-48E0-A92B-13A66F5F370B}.Debug|Win32.ActiveCfg = Debug|Win32
+		{3E459EA7-0252-48E0-A92B-13A66F5F370B}.Debug|Win32.Build.0 = Debug|Win32
+		{3E459EA7-0252-48E0-A92B-13A66F5F370B}.Debug|x64.ActiveCfg = Debug|x64
+		{3E459EA7-0252-48E0-A92B-13A66F5F370B}.Debug|x64.Build.0 = Debug|x64
+		{3E459EA7-0252-48E0-A92B-13A66F5F370B}.Release|Win32.ActiveCfg = Release|Win32
+		{3E459EA7-0252-48E0-A92B-13A66F5F370B}.Release|Win32.Build.0 = Release|Win32
+		{3E459EA7-0252-48E0-A92B-13A66F5F370B}.Release|x64.ActiveCfg = Release|x64
+		{3E459EA7-0252-48E0-A92B-13A66F5F370B}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
