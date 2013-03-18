@@ -51,5 +51,13 @@ typedef CRITICAL_SECTION mutex_t;
 #define _ftime_s(timeb) _ftime(timeb)
 #endif
 
+enum SystemVersion {
+    SYS_VER_UNSUPPORTED,
+    SYS_VER_WIN_XP_CLASS, // also Server 2003/R2
+    SYS_VER_WIN_7_CLASS,  // also Windows 8, Server 2012, Server 2008/R2 & Vista
+};
+
+int supported_system_version();
+
 #endif
 

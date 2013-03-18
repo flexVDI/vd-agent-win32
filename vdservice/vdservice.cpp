@@ -119,30 +119,6 @@ VDService* VDService::get()
     return (VDService*)_singleton;
 }
 
-enum SystemVersion {
-    SYS_VER_UNSUPPORTED,
-    SYS_VER_WIN_XP_CLASS, // also Server 2003/R2
-    SYS_VER_WIN_7_CLASS,  // also Windows 8, Server 2012, Server 2008/R2 & Vista
-};
-
-int supported_system_version()
-{
-    OSVERSIONINFOEX osvi;
-
-    ZeroMemory(&osvi, sizeof(OSVERSIONINFOEX));
-    osvi.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEX);
-    if (!GetVersionEx((OSVERSIONINFO*)&osvi)) {
-        vd_printf("GetVersionEx() failed: %lu", GetLastError());
-        return 0;
-    }
-    if (osvi.dwMajorVersion == 5 && (osvi.dwMinorVersion == 1 || osvi.dwMinorVersion == 2)) {
-        return SYS_VER_WIN_XP_CLASS;
-    } else if (osvi.dwMajorVersion == 6 && osvi.dwMinorVersion >= 0 && osvi.dwMinorVersion <= 2) {
-        return SYS_VER_WIN_7_CLASS;
-    }
-    return 0;
-}
-
 VDService::VDService()
     : _status_handle (0)
     , _events (NULL)
