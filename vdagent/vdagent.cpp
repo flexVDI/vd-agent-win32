@@ -65,6 +65,8 @@ typedef struct ALIGN_VC VDIChunk {
 #define VD_MESSAGE_HEADER_SIZE (sizeof(VDIChunk) + sizeof(VDAgentMessage))
 #define VD_READ_BUF_SIZE       (sizeof(VDIChunk) + VD_AGENT_MAX_DATA_SIZE)
 
+typedef BOOL (WINAPI *PCLIPBOARD_OP)(HWND);
+
 class VDAgent {
 public:
     static VDAgent* get();
@@ -120,6 +122,10 @@ private:
     static VDAgent* _singleton;
     HWND _hwnd;
     HWND _hwnd_next_viewer;
+    HMODULE _user_lib; 
+    PCLIPBOARD_OP _add_clipboard_listener;
+    PCLIPBOARD_OP _remove_clipboard_listener;
+    int _system_version;
     int _clipboard_owner;
     DWORD _clipboard_tick;
     DWORD _buttons_state;
@@ -174,6 +180,9 @@ VDAgent* VDAgent::get()
 VDAgent::VDAgent()
     : _hwnd (NULL)
     , _hwnd_next_viewer (NULL)
+    , _user_lib (NULL)
+    , _add_clipboard_listener (NULL)
+    , _remove_clipboard_listener (NULL)
     , _clipboard_owner (owner_none)
     , _clipboard_tick (0)
     , _buttons_state (0)
@@ -201,6 +210,7 @@ VDAgent::VDAgent()
     TCHAR log_path[MAX_PATH];
     TCHAR temp_path[MAX_PATH];
 
+    _system_version = supported_system_version();
     if (GetTempPath(MAX_PATH, temp_path)) {
         swprintf_s(log_path, MAX_PATH, VD_AGENT_LOG_PATH, temp_path);
         _log = VDLog::get(log_path);
@@ -262,6 +272,22 @@ bool VDAgent::run()
     if (!SetProcessShutdownParameters(0x100, 0)) {
         vd_printf("SetProcessShutdownParameters failed %lu", GetLastError());
     }
+    if (_system_version == SYS_VER_WIN_7_CLASS) {
+        _user_lib = LoadLibrary(L"User32.dll");
+        if (!_user_lib) {
+            vd_printf("LoadLibrary failed %lu", GetLastError());
+            return false;
+        }
+        _add_clipboard_listener =
+            (PCLIPBOARD_OP)GetProcAddress(_user_lib, "AddClipboardFormatListener");
+        _remove_clipboard_listener =
+            (PCLIPBOARD_OP)GetProcAddress(_user_lib, "RemoveClipboardFormatListener");
+        if (!_add_clipboard_listener || !_remove_clipboard_listener) {
+            vd_printf("GetProcAddress failed %lu", GetLastError());
+            cleanup();
+            return false;
+        }
+    }
     _control_event = CreateEvent(NULL, FALSE, FALSE, NULL);
     if (!_control_event) {
         vd_printf("CreateEvent() failed: %lu", GetLastError());
@@ -320,6 +346,7 @@ bool VDAgent::run()
 
 void VDAgent::cleanup()
 {
+    FreeLibrary(_user_lib);
     CloseHandle(_stop_event);
     CloseHandle(_control_event);
     CloseHandle(_vio_serial);
@@ -420,7 +447,11 @@ void VDAgent::input_desktop_message_loop()
     if (!WTSRegisterSessionNotification(_hwnd, NOTIFY_FOR_ALL_SESSIONS)) {
         vd_printf("WTSRegisterSessionNotification() failed: %lu", GetLastError());
     }
-    _hwnd_next_viewer = SetClipboardViewer(_hwnd);
+    if (_system_version == SYS_VER_WIN_7_CLASS) {
+        _add_clipboard_listener(_hwnd);
+    } else {
+        _hwnd_next_viewer = SetClipboardViewer(_hwnd);
+    }
     while (_running && !_desktop_switch) {
         event_dispatcher(INFINITE, QS_ALLINPUT);
     }
@@ -429,7 +460,11 @@ void VDAgent::input_desktop_message_loop()
         KillTimer(_hwnd, VD_TIMER_ID);
         _pending_input = false;
     }
-    ChangeClipboardChain(_hwnd, _hwnd_next_viewer);
+    if (_system_version == SYS_VER_WIN_7_CLASS) {
+        _remove_clipboard_listener(_hwnd);
+    } else {
+        ChangeClipboardChain(_hwnd, _hwnd_next_viewer);
+    }
     WTSUnRegisterSessionNotification(_hwnd);
     DestroyWindow(_hwnd);
     CloseDesktop(hdesk);
@@ -1343,6 +1378,7 @@ LRESULT CALLBACK VDAgent::wnd_proc(HWND hwnd, UINT message, WPARAM wparam, LPARA
             SendMessage(a->_hwnd_next_viewer, message, wparam, lparam);
         }
         break;
+    case WM_CLIPBOARDUPDATE:
     case WM_DRAWCLIPBOARD:
         if (a->_hwnd != GetClipboardOwner()) {
             a->set_clipboard_owner(a->owner_none);

@@ -354,6 +354,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\common\vdcommon.cpp"
+				>
+			</File>
+			<File
 				RelativePath="..\common\vdlog.cpp"
 				>
 			</File>
