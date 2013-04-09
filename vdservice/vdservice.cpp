@@ -170,12 +170,16 @@ bool VDService::install()
         printf("OpenSCManager failed\n");
         return false;
     }
-    TCHAR path[_MAX_PATH + 1];
-    if (!GetModuleFileName(0, path, sizeof(path) / sizeof(path[0]))) {
+    TCHAR path[_MAX_PATH + 2];
+    DWORD len = GetModuleFileName(0, path + 1, _MAX_PATH);
+    if (len == 0 || len == _MAX_PATH) {
         printf("GetModuleFileName failed\n");
         CloseServiceHandle(service_control_manager);
         return false;
     }
+    // add quotes for the case path contains a space (see CreateService doc)
+    path[0] = path[len + 1] = TEXT('\"');
+    path[len + 2] = 0;
     SC_HANDLE service = CreateService(service_control_manager, VD_SERVICE_NAME,
                                       VD_SERVICE_DISPLAY_NAME, SERVICE_ALL_ACCESS,
                                       SERVICE_WIN32_OWN_PROCESS, SERVICE_AUTO_START,
