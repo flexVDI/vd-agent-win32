@@ -24,6 +24,7 @@ vdagent_LDADD = -lwtsapi32 $(CXIMAGE_LIBS) vdagent_rc.$(OBJEXT)
 vdagent_CXXFLAGS = $(AM_CXXFLAGS) $(CXIMAGE_CFLAGS)
 vdagent_LDFLAGS = $(AM_LDFLAGS) -Wl,--subsystem,windows
 vdagent_SOURCES =			\
+	common/vdcommon.cpp             \
 	common/vdcommon.h		\
 	common/vdlog.cpp		\
 	common/vdlog.h			\
@@ -42,6 +43,7 @@ MAINTAINERCLEANFILES += vdagent_rc.$(OBJEXT)
 vdservice_LDADD = -lwtsapi32 vdservice_rc.$(OBJEXT)
 vdservice_SOURCES =			\
 	common/stdint.h			\
+	common/vdcommon.cpp             \
 	common/vdcommon.h		\
 	common/vdlog.cpp		\
 	common/vdlog.h			\

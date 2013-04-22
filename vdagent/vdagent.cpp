@@ -33,6 +33,11 @@
 #define VD_CLIPBOARD_TIMEOUT_MS 3000
 #define VD_CLIPBOARD_FORMAT_MAX_TYPES 16
 
+// only in vista+, not yet in mingw
+#ifndef WM_CLIPBOARDUPDATE
+#define WM_CLIPBOARDUPDATE      0x031D
+#endif
+
 //FIXME: extract format/type stuff to win_vdagent_common for use by windows\platform.cpp as well
 typedef struct VDClipboardFormat {
     uint32_t format;
