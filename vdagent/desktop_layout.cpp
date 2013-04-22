@@ -253,19 +253,36 @@ bool DesktopLayout::init_dev_mode(LPCTSTR dev_name, DEVMODE* dev_mode, DisplayMo
         return true;
     }
 
-    // attach
-    EnumDisplaySettings(dev_name, ENUM_CURRENT_SETTINGS, dev_mode);
-    ret = ChangeDisplaySettingsEx(dev_name, dev_mode, NULL, CDS_UPDATEREGISTRY, NULL);
-    vd_printf("attach %d", ret);
-
-    // Update custom resolution
-    custom.xres = mode->_width;
-    custom.yres = mode->_height;
-    custom.bpp = mode->_depth;
     hdc = CreateDC(dev_name, NULL, NULL, NULL);
     if (!hdc) {
+        // for some reason, windows want those 3 flags to enable monitor
+        dev_mode->dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_POSITION;
+        dev_mode->dmPelsWidth = mode->_width;
+        dev_mode->dmPelsHeight = mode->_height;
+        ret = ChangeDisplaySettingsEx(dev_name, dev_mode, NULL, CDS_UPDATEREGISTRY, NULL);
+        if (ret == DISP_CHANGE_BADMODE) {
+            // custom resolution might not be set yet, use known resolution
+            // FIXME: this causes client temporary resize... a
+            // solution would involve passing custom resolution before
+            // driver initialization, perhaps through registry
+            dev_mode->dmPelsWidth = 640;
+            dev_mode->dmPelsHeight = 480;
+            ret = ChangeDisplaySettingsEx(dev_name, dev_mode, NULL, CDS_UPDATEREGISTRY, NULL);
+        }
+
+        vd_printf("attach %d", ret);
+        hdc = CreateDC(dev_name, NULL, NULL, NULL);
+    }
+
+    if (!hdc) {
         vd_printf("failed to create DC");
+        return false;
     } else {
+        // Update custom resolution
+        custom.xres = mode->_width;
+        custom.yres = mode->_height;
+        custom.bpp = mode->_depth;
+
         int err = ExtEscape(hdc, QXL_ESCAPE_SET_CUSTOM_DISPLAY,
                             sizeof(QXLEscapeSetCustomDisplay), (LPCSTR)&custom, 0, NULL);
         if (err <= 0) {
