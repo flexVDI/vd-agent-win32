@@ -610,7 +610,6 @@ bool VDAgent::handle_mon_config(VDAgentMonitorsConfig* mon_config, uint32_t port
     VDAgentReply* reply;
     size_t display_count;
 
-    _desktop_layout->get_displays();
     display_count = _desktop_layout->get_display_count();
     for (uint32_t i = 0; i < display_count; i++) {
         DisplayMode* mode = _desktop_layout->get_display(i);
@@ -1368,6 +1367,9 @@ LRESULT CALLBACK VDAgent::wnd_proc(HWND hwnd, UINT message, WPARAM wparam, LPARA
     switch (message) {
     case WM_DISPLAYCHANGE:
         vd_printf("Display change");
+        // the desktop layout needs to be updated for the mouse
+        // position to be scaled correctly
+        a->_desktop_layout->get_displays();
         break;
     case WM_TIMER:
         a->send_input();
