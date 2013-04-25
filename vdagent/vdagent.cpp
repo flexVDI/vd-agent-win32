@@ -627,6 +627,11 @@ bool VDAgent::handle_mon_config(VDAgentMonitorsConfig* mon_config, uint32_t port
         VDAgentMonConfig* mon = &mon_config->monitors[i];
         vd_printf("%d. %u*%u*%u (%d,%d) %u", i, mon->width, mon->height, mon->depth, mon->x,
                   mon->y, !!(mon_config->flags & VD_AGENT_CONFIG_MONITORS_FLAG_USE_POS));
+        if (mon->height == 0 && mon->depth == 0) {
+            vd_printf("%d. detaching", i);
+            mode->set_attached(false);
+            continue;
+        }
         mode->set_res(mon->width, mon->height, mon->depth);
         if (mon_config->flags & VD_AGENT_CONFIG_MONITORS_FLAG_USE_POS) {
             mode->set_pos(mon->x, mon->y);
@@ -787,6 +792,7 @@ bool VDAgent::send_announce_capabilities(bool request)
     VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_REPLY);
     VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_DISPLAY_CONFIG);
     VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_CLIPBOARD_BY_DEMAND);
+    VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_SPARSE_MONITORS_CONFIG);
     vd_printf("Sending capabilities:");
     for (uint32_t i = 0 ; i < caps_size; ++i) {
         vd_printf("%X", caps->caps[i]);
