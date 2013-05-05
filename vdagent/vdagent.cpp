@@ -1231,6 +1231,10 @@ void VDAgent::dispatch_message(VDAgentMessage* msg, uint32_t port)
     case VD_AGENT_ANNOUNCE_CAPABILITIES:
         res = a->handle_announce_capabilities((VDAgentAnnounceCapabilities*)msg->data, msg->size);
         break;
+    case VD_AGENT_CLIENT_DISCONNECTED:
+        vd_printf("Client disconnected, agent to be restarted");
+        a->set_control_event(CONTROL_STOP);
+        break;
     default:
         vd_printf("Unsupported message type %u size %u", msg->type, msg->size);
     }
