@@ -984,9 +984,12 @@ void VDAgent::on_clipboard_request(UINT format)
         event_dispatcher(VD_CLIPBOARD_TIMEOUT_MS, 0);
     }
 
-    cleanup_in_msg();
     if (_clipboard_tick) {
         vd_printf("Clipboard wait timeout");
+        _clipboard_tick = 0;
+    } else {
+        // reset incoming message state only upon completion (even after timeout)
+        cleanup_in_msg();
     }
 }
 
@@ -1308,11 +1311,15 @@ void VDAgent::handle_chunk(VDIChunk* chunk)
         memcpy((uint8_t*)_in_msg + _in_msg_pos, chunk->data, chunk->hdr.size);
         _in_msg_pos += chunk->hdr.size;
         // update clipboard tick on each clipboard chunk for timeout setting
-        if (_in_msg->type == VD_AGENT_CLIPBOARD) {
+        if (_in_msg->type == VD_AGENT_CLIPBOARD && _clipboard_tick) {
             _clipboard_tick = GetTickCount();
         }
         if (_in_msg_pos == sizeof(VDAgentMessage) + _in_msg->size) {
-            dispatch_message(_in_msg, 0);
+            if (_in_msg->type == VD_AGENT_CLIPBOARD && !_clipboard_tick) {
+                vd_printf("Clipboard received but dropped due to timeout");
+            } else {
+                dispatch_message(_in_msg, 0);
+            }
             cleanup_in_msg();
         }
     }
