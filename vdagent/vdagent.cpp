@@ -618,7 +618,9 @@ bool VDAgent::handle_mon_config(VDAgentMonitorsConfig* mon_config, uint32_t port
     display_count = _desktop_layout->get_display_count();
     for (uint32_t i = 0; i < display_count; i++) {
         DisplayMode* mode = _desktop_layout->get_display(i);
-        ASSERT(mode);
+        if (!mode) {
+            continue;
+        }
         if (i >= mon_config->num_of_monitors) {
             vd_printf("%d. detached", i);
             mode->set_attached(false);
@@ -748,8 +750,9 @@ void VDAgent::set_display_depth(uint32_t depth)
     // setting depth for all the monitors, including unattached ones
     for (uint32_t i = 0; i < display_count; i++) {
         DisplayMode* mode = _desktop_layout->get_display(i);
-        ASSERT(mode);
-        mode->set_depth(depth);
+        if (mode) {
+            mode->set_depth(depth);
+        }
     }
 
     if (display_count) {

@@ -155,7 +155,7 @@ void DesktopLayout::normalize_displays_pos()
 
     for (iter = _displays.begin(); iter != _displays.end(); iter++) {
         mode = *iter;
-        if (mode->_attached) {
+        if (mode && mode->_attached) {
             min_x = min(min_x, mode->_pos_x);
             min_y = min(min_y, mode->_pos_y);
             max_x = max(max_x, mode->_pos_x + (LONG)mode->_width);
@@ -164,7 +164,10 @@ void DesktopLayout::normalize_displays_pos()
     }
     if (min_x || min_y) {
         for (iter = _displays.begin(); iter != _displays.end(); iter++) {
-            (*iter)->move_pos(-min_x, -min_y);
+            mode = *iter;
+            if (mode) {
+                mode->move_pos(-min_x, -min_y);
+            }
         }
     }
     _total_width = max_x - min_x;
