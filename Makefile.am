@@ -32,6 +32,8 @@ vdagent_SOURCES =			\
 	vdagent/desktop_layout.h	\
 	vdagent/display_setting.cpp	\
 	vdagent/display_setting.h	\
+        vdagent/file_xfer.cpp		\
+        vdagent/file_xfer.h		\
 	vdagent/vdagent.cpp		\
 	$(NULL)
 

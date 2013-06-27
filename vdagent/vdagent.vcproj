@@ -350,6 +350,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\file_xfer.cpp"
+				>
+			</File>
+			<File
 				RelativePath=".\vdagent.cpp"
 				>
 			</File>
@@ -373,6 +377,10 @@
 			</File>
 			<File
 				RelativePath=".\display_setting.h"
+				>
+			</File>
+			<File
+				RelativePath=".\file_xfer.h"
 				>
 			</File>
 			<File

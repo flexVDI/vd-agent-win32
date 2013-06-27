@@ -18,6 +18,7 @@
 #include "vdcommon.h"
 #include "desktop_layout.h"
 #include "display_setting.h"
+#include "file_xfer.h"
 #include "ximage.h"
 #undef max
 #undef min
@@ -147,6 +148,7 @@ private:
     bool _desktop_switch;
     DesktopLayout* _desktop_layout;
     DisplaySetting _display_setting;
+    FileXfer _file_xfer;
     HANDLE _vio_serial;
     OVERLAPPED _read_overlapped;
     OVERLAPPED _write_overlapped;
@@ -1237,6 +1239,15 @@ void VDAgent::dispatch_message(VDAgentMessage* msg, uint32_t port)
     case VD_AGENT_ANNOUNCE_CAPABILITIES:
         res = handle_announce_capabilities((VDAgentAnnounceCapabilities*)msg->data, msg->size);
         break;
+    case VD_AGENT_FILE_XFER_START:
+    case VD_AGENT_FILE_XFER_STATUS:
+    case VD_AGENT_FILE_XFER_DATA: {
+        VDAgentFileXferStatusMessage status;
+        if (_file_xfer.dispatch(msg, &status)) {
+            write_message(VD_AGENT_FILE_XFER_STATUS, sizeof(status), &status);
+        }
+        break;
+    }
     case VD_AGENT_CLIENT_DISCONNECTED:
         vd_printf("Client disconnected, agent to be restarted");
         set_control_event(CONTROL_STOP);
