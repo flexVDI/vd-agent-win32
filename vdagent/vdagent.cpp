@@ -1206,48 +1206,47 @@ bool VDAgent::init_vio_serial()
 
 void VDAgent::dispatch_message(VDAgentMessage* msg, uint32_t port)
 {
-    VDAgent* a = _singleton;
     bool res = true;
 
     switch (msg->type) {
     case VD_AGENT_MOUSE_STATE:
-        res = a->handle_mouse_event((VDAgentMouseState*)msg->data);
+        res = handle_mouse_event((VDAgentMouseState*)msg->data);
         break;
     case VD_AGENT_MONITORS_CONFIG:
-        res = a->handle_mon_config((VDAgentMonitorsConfig*)msg->data, port);
+        res = handle_mon_config((VDAgentMonitorsConfig*)msg->data, port);
         break;
     case VD_AGENT_CLIPBOARD:
-        a->handle_clipboard((VDAgentClipboard*)msg->data, msg->size - sizeof(VDAgentClipboard));
+        handle_clipboard((VDAgentClipboard*)msg->data, msg->size - sizeof(VDAgentClipboard));
         break;
     case VD_AGENT_CLIPBOARD_GRAB:
-        a->handle_clipboard_grab((VDAgentClipboardGrab*)msg->data, msg->size);        
+        handle_clipboard_grab((VDAgentClipboardGrab*)msg->data, msg->size);        
         break;
     case VD_AGENT_CLIPBOARD_REQUEST:
-        res = a->handle_clipboard_request((VDAgentClipboardRequest*)msg->data);
+        res = handle_clipboard_request((VDAgentClipboardRequest*)msg->data);
         if (!res) {
             VDAgentClipboard clipboard = {VD_AGENT_CLIPBOARD_NONE};
-            res = a->write_message(VD_AGENT_CLIPBOARD, sizeof(clipboard), &clipboard);
+            res = write_message(VD_AGENT_CLIPBOARD, sizeof(clipboard), &clipboard);
         }
         break;
     case VD_AGENT_CLIPBOARD_RELEASE:
-        a->handle_clipboard_release();
+        handle_clipboard_release();
         break;
     case VD_AGENT_DISPLAY_CONFIG:
-        res = a->handle_display_config((VDAgentDisplayConfig*)msg->data, port);
+        res = handle_display_config((VDAgentDisplayConfig*)msg->data, port);
         break;
     case VD_AGENT_ANNOUNCE_CAPABILITIES:
-        res = a->handle_announce_capabilities((VDAgentAnnounceCapabilities*)msg->data, msg->size);
+        res = handle_announce_capabilities((VDAgentAnnounceCapabilities*)msg->data, msg->size);
         break;
     case VD_AGENT_CLIENT_DISCONNECTED:
         vd_printf("Client disconnected, agent to be restarted");
-        a->set_control_event(CONTROL_STOP);
+        set_control_event(CONTROL_STOP);
         break;
     default:
         vd_printf("Unsupported message type %u size %u", msg->type, msg->size);
     }
     if (!res) {
         vd_printf("handling message type %u failed: %lu", msg->type, GetLastError());
-        a->_running = false;
+        _running = false;
     }
 }
 
