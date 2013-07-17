@@ -118,7 +118,7 @@ void DesktopLayout::set_displays()
             break;
         }
         if (display_id >= _displays.size()) {
-            vd_printf("display_id %lu out of range, #displays %u", display_id, _displays.size());
+            vd_printf("display_id %lu out of range, #displays %zu" , display_id, _displays.size());
             break;
         }
         if (!init_dev_mode(dev_info.DeviceName, &dev_mode, _displays.at(display_id), true)) {
