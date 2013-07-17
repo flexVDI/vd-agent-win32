@@ -82,7 +82,7 @@ bool FileXfer::handle_data(VDAgentFileXferDataMessage* data,
                            VDAgentFileXferStatusMessage* status)
 {
     FileXferTasks::iterator iter;
-    FileXferTask* task;
+    FileXferTask* task = NULL;
     DWORD written;
 
     status->id = data->id;
@@ -108,13 +108,17 @@ bool FileXfer::handle_data(VDAgentFileXferDataMessage* data,
     }
     vd_printf("%u completed", iter->first);
     status->result = VD_AGENT_FILE_XFER_STATUS_SUCCESS;
+
 fin:
-    CloseHandle(task->handle);
-    if (status->result != VD_AGENT_FILE_XFER_STATUS_SUCCESS) {
-        DeleteFileA(task->name);
+    if (task) {
+        CloseHandle(task->handle);
+        if (status->result != VD_AGENT_FILE_XFER_STATUS_SUCCESS) {
+            DeleteFileA(task->name);
+        }
+        _tasks.erase(iter);
+        delete task;
     }
-    _tasks.erase(iter);
-    delete task;
+
     return true;
 }
 
