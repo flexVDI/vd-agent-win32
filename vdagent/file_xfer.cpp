@@ -66,8 +66,14 @@ void FileXfer::handle_start(VDAgentFileXferStartMessage* start,
         vd_printf("insufficient disk space %" PRIu64, free_bytes.QuadPart);
         return;
     }
-    strcat_s(file_path, MAX_PATH, "\\");
-    strcat_s(file_path, MAX_PATH, file_name);
+
+    if (strlen(file_path) + strlen(file_name) + 1 >= MAX_PATH) {
+        vd_printf("error: file too long %s\%s", file_path, file_name);
+        return;
+    }
+
+    strcat(file_path, "\\");
+    strcat(file_path, file_name);
     handle = CreateFileA(file_path, GENERIC_WRITE, 0, NULL, CREATE_NEW, 0, NULL);
     if (handle == INVALID_HANDLE_VALUE) {
         vd_printf("failed creating %s %lu", file_path, GetLastError());
@@ -173,10 +179,10 @@ bool FileXfer::g_key_get_string(char* data, const char* group, const char* key, 
     char group_pfx[G_KEY_MAX_LEN], key_pfx[G_KEY_MAX_LEN];
     char *group_pos, *key_pos, *next_group_pos;
 
-    sprintf_s(group_pfx, sizeof(group_pfx), "[%s]", group);
+    snprintf(group_pfx, sizeof(group_pfx), "[%s]", group);
     if (!(group_pos = strstr((char*)data, group_pfx))) return false;
 
-    sprintf_s(key_pfx, sizeof(key_pfx), "\n%s=", key);
+    snprintf(key_pfx, sizeof(key_pfx), "\n%s=", key);
     if (!(key_pos = strstr(group_pos, key_pfx))) return false;
 
     next_group_pos = strstr(group_pos + strlen(group_pfx), "[");
