@@ -182,7 +182,7 @@ bool FileXfer::g_key_get_string(char* data, const char* group, const char* key, 
     next_group_pos = strstr(group_pos + strlen(group_pfx), "[");
     if (next_group_pos && key_pos > next_group_pos) return false; 
 
-    return !!sscanf_s(key_pos + strlen(key_pfx), "%s\n", value);
+    return !!sscanf(key_pos + strlen(key_pfx), "%s\n", value);
 }
 
 bool FileXfer::g_key_get_uint64(char* data, const char* group, const char* key, uint64_t* value)
@@ -190,5 +190,5 @@ bool FileXfer::g_key_get_uint64(char* data, const char* group, const char* key, 
     char str[G_KEY_MAX_LEN];
 
     if (!g_key_get_string(data, group, key, str)) return false;
-    return !!sscanf_s(str, "%llu", value);
+    return !!sscanf(str, "%" PRIu64, value);
 }
