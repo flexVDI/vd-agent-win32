@@ -466,7 +466,7 @@ bool DisplaySetting::reload_win_animation(HKEY desktop_reg_key)
 
 bool DisplaySetting::set_bool_system_parameter_info(int action, BOOL param)
 {
-    if (!SystemParametersInfo(action, 0, (PVOID)param, 0)) {
+    if (!SystemParametersInfo(action, 0, (PVOID)(uintptr_t)param, 0)) {
         vd_printf("SystemParametersInfo %d: failed %lu", action, GetLastError());
         return false;
     }
