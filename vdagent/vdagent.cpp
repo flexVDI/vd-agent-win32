@@ -705,7 +705,7 @@ bool VDAgent::handle_clipboard(VDAgentClipboard* clipboard, uint32_t size)
         if (err == ERROR_NOT_ENOUGH_MEMORY) {
             vd_printf("Not enough memory to set clipboard data, size %u bytes", size);
         } else {
-            vd_printf("SetClipboardData failed: %u", err);
+            vd_printf("SetClipboardData failed: %lu", err);
         }
     }
 fin:
@@ -1200,7 +1200,7 @@ bool VDAgent::init_vio_serial()
     _vio_serial = CreateFile(VIOSERIAL_PORT_PATH, GENERIC_READ | GENERIC_WRITE , 0, NULL,
                              OPEN_EXISTING, FILE_FLAG_OVERLAPPED, NULL);
     if (_vio_serial == INVALID_HANDLE_VALUE) {
-        vd_printf("Failed opening %ls, error %u", VIOSERIAL_PORT_PATH, GetLastError());
+        vd_printf("Failed opening %ls, error %lu", VIOSERIAL_PORT_PATH, GetLastError());
         return false;
     }
     return true;

@@ -273,7 +273,7 @@ bool DesktopLayout::init_dev_mode(LPCTSTR dev_name, DEVMODE* dev_mode, DisplayMo
             ret = ChangeDisplaySettingsEx(dev_name, dev_mode, NULL, CDS_UPDATEREGISTRY, NULL);
         }
 
-        vd_printf("attach %d", ret);
+        vd_printf("attach %ld", ret);
         hdc = CreateDC(dev_name, NULL, NULL, NULL);
     }
 
