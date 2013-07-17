@@ -948,7 +948,7 @@ void VDAgent::on_clipboard_grab()
         set_clipboard_owner(owner_guest);
     } else {
         UINT format = 0;
-        while (format = EnumClipboardFormats(format)) {
+        while ((format = EnumClipboardFormats(format))) {
             vd_printf("Unsupported clipboard format %u", format);
         }
     }  
