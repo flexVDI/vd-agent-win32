@@ -16,6 +16,10 @@
 */
 
 #include <shlobj.h>
+#define __STDC_FORMAT_MACROS
+#define __USE_MINGW_ANSI_STDIO 1
+#include <inttypes.h>
+#include <stdio.h>
 #include "file_xfer.h"
 
 FileXfer::~FileXfer()
@@ -48,7 +52,7 @@ void FileXfer::handle_start(VDAgentFileXferStartMessage* start,
         vd_printf("file id %u meta parsing failed", start->id);
         return;
     }
-    vd_printf("%u %s (%llu)", start->id, file_name, file_size);
+    vd_printf("%u %s (%" PRIu64 ")", start->id, file_name, file_size);
     if (FAILED(SHGetFolderPathA(NULL, CSIDL_COMMON_DESKTOPDIRECTORY | CSIDL_FLAG_CREATE, NULL,
             SHGFP_TYPE_CURRENT, file_path))) {
         vd_printf("failed getting desktop path");
@@ -59,7 +63,7 @@ void FileXfer::handle_start(VDAgentFileXferStartMessage* start,
         return;
     }
     if (free_bytes.QuadPart < file_size) {
-        vd_printf("insufficient disk space %llu", free_bytes.QuadPart);
+        vd_printf("insufficient disk space %" PRIu64, free_bytes.QuadPart);
         return;
     }
     strcat_s(file_path, MAX_PATH, "\\");
