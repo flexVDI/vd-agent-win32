@@ -1,0 +1,5 @@
+v0.7.2
+======
+
+- File transfer support
+- Convert line endings when needed
