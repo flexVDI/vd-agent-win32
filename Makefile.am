@@ -35,6 +35,8 @@ vdagent_SOURCES =			\
         vdagent/file_xfer.cpp		\
         vdagent/file_xfer.h		\
 	vdagent/vdagent.cpp		\
+	vdagent/as_user.cpp		\
+	vdagent/as_user.h		\
 	$(NULL)
 
 vdagent_rc.$(OBJEXT): vdagent/vdagent.rc
