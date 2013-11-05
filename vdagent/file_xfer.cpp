@@ -21,6 +21,7 @@
 #include <inttypes.h>
 #include <stdio.h>
 #include "file_xfer.h"
+#include "as_user.h"
 
 FileXfer::~FileXfer()
 {
@@ -44,6 +45,7 @@ void FileXfer::handle_start(VDAgentFileXferStartMessage* start,
     FileXferTask* task;
     uint64_t file_size;
     HANDLE handle;
+    AsUser as_user;
 
     status->id = start->id;
     status->result = VD_AGENT_FILE_XFER_STATUS_ERROR;
@@ -53,6 +55,11 @@ void FileXfer::handle_start(VDAgentFileXferStartMessage* start,
         return;
     }
     vd_printf("%u %s (%" PRIu64 ")", start->id, file_name, file_size);
+    if (!as_user.begin()) {
+        vd_printf("as_user failed");
+        return;
+    }
+
     if (FAILED(SHGetFolderPathA(NULL, CSIDL_COMMON_DESKTOPDIRECTORY | CSIDL_FLAG_CREATE, NULL,
             SHGFP_TYPE_CURRENT, file_path))) {
         vd_printf("failed getting desktop path");
