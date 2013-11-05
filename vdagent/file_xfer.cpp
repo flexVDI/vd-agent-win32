@@ -60,7 +60,7 @@ void FileXfer::handle_start(VDAgentFileXferStartMessage* start,
         return;
     }
 
-    if (FAILED(SHGetFolderPathA(NULL, CSIDL_COMMON_DESKTOPDIRECTORY | CSIDL_FLAG_CREATE, NULL,
+    if (FAILED(SHGetFolderPathA(NULL, CSIDL_DESKTOPDIRECTORY | CSIDL_FLAG_CREATE, NULL,
             SHGFP_TYPE_CURRENT, file_path))) {
         vd_printf("failed getting desktop path");
         return;
