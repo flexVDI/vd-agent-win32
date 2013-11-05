@@ -49,7 +49,7 @@ void FileXfer::handle_start(VDAgentFileXferStartMessage* start,
 
     status->id = start->id;
     status->result = VD_AGENT_FILE_XFER_STATUS_ERROR;
-    if (!g_key_get_string(file_meta, "vdagent-file-xfer", "name", file_name) ||
+    if (!g_key_get_string(file_meta, "vdagent-file-xfer", "name", file_name, sizeof(file_name)) ||
             !g_key_get_uint64(file_meta, "vdagent-file-xfer", "size", &file_size)) {
         vd_printf("file id %u meta parsing failed", start->id);
         return;
@@ -181,10 +181,12 @@ bool FileXfer::dispatch(VDAgentMessage* msg, VDAgentFileXferStatusMessage* statu
 //minimal parsers for GKeyFile, supporting only key=value with no spaces.
 #define G_KEY_MAX_LEN 256
 
-bool FileXfer::g_key_get_string(char* data, const char* group, const char* key, char* value)
+bool FileXfer::g_key_get_string(char* data, const char* group, const char* key, char* value,
+                                                  unsigned vsize)
 {
     char group_pfx[G_KEY_MAX_LEN], key_pfx[G_KEY_MAX_LEN];
-    char *group_pos, *key_pos, *next_group_pos;
+    char *group_pos, *key_pos, *next_group_pos, *start, *end;
+    unsigned len;
 
     snprintf(group_pfx, sizeof(group_pfx), "[%s]", group);
     if (!(group_pos = strstr((char*)data, group_pfx))) return false;
@@ -193,15 +195,26 @@ bool FileXfer::g_key_get_string(char* data, const char* group, const char* key, 
     if (!(key_pos = strstr(group_pos, key_pfx))) return false;
 
     next_group_pos = strstr(group_pos + strlen(group_pfx), "[");
-    if (next_group_pos && key_pos > next_group_pos) return false; 
+    if (next_group_pos && key_pos > next_group_pos) return false;
 
-    return !!sscanf(key_pos + strlen(key_pfx), "%s\n", value);
+    start = key_pos + strlen(key_pfx);
+    end = strchr(start, '\n');
+    if (!end) return false;
+
+    len = end - start;
+    if (len >= vsize) return false;
+
+    memcpy(value, start, len);
+    value[len] = '\0';
+
+    return true;
 }
 
 bool FileXfer::g_key_get_uint64(char* data, const char* group, const char* key, uint64_t* value)
 {
     char str[G_KEY_MAX_LEN];
 
-    if (!g_key_get_string(data, group, key, str)) return false;
+    if (!g_key_get_string(data, group, key, str, sizeof(str)))
+        return false;
     return !!sscanf(str, "%" PRIu64, value);
 }

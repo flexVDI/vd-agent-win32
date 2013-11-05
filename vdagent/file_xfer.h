@@ -44,7 +44,8 @@ private:
     void handle_start(VDAgentFileXferStartMessage* start, VDAgentFileXferStatusMessage* status);
     bool handle_data(VDAgentFileXferDataMessage* data, VDAgentFileXferStatusMessage* status);
     void handle_status(VDAgentFileXferStatusMessage* status);
-    bool g_key_get_string(char* data, const char* group, const char* key, char* value);
+    bool g_key_get_string(char* data, const char* group, const char* key, char* value,
+                                        unsigned vsize);
     bool g_key_get_uint64(char* data, const char* group, const char* key, uint64_t* value);
 
 private:
