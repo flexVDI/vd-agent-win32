@@ -3,13 +3,15 @@ MAINTAINERCLEANFILES =
 
 DIST_SUBDIRS = spice-protocol
 
-INCLUDES =				\
+AM_CXXFLAGS = -flto -fwhole-program
+AM_CPPFLAGS = 				\
+	-DUNICODE 			\
+	-D_UNICODE			\
+	-DOLDMSVCRT			\
 	-I$(top_srcdir)/common		\
 	-I$(top_srcdir)/spice-protocol	\
 	$(NULL)
 
-AM_CXXFLAGS = -flto -fwhole-program
-AM_CPPFLAGS = -DUNICODE -D_UNICODE -DOLDMSVCRT
 AM_LDFLAGS = -static
 if !ENABLE_DEBUG
 AM_LDFLAGS += -s
