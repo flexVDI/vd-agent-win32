@@ -1,4 +1,5 @@
 NULL =
+EXTRA_DIST =
 MAINTAINERCLEANFILES =
 
 DIST_SUBDIRS = spice-protocol
@@ -61,8 +62,28 @@ vdservice_rc.$(OBJEXT): vdservice/vdservice.rc
 
 MAINTAINERCLEANFILES += vdservice_rc.$(OBJEXT)
 
+deps.txt:
+	$(AM_V_GEN)rpm -qa | grep $(host_os) | sort | unix2dos > $@
 
-EXTRA_DIST =			\
+MANUFACTURER = The Spice Project
+
+EXTRA_DIST += spice-vdagent.wxs.in
+CONFIG_STATUS_DEPENDENCIES = spice-vdagent.wxs.in
+
+spice-vdagent-$(WIXL_ARCH)-$(VERSION)$(BUILDID).msi: spice-vdagent.wxs deps.txt all
+	$(AM_V_GEN)DESTDIR=`mktemp -d`&&				\
+	make -C $(top_builddir) install DESTDIR=$$DESTDIR >/dev/null &&	\
+	MANUFACTURER="$(MANUFACTURER)" wixl -D SourceDir=$(prefix)	\
+	  -D DESTDIR=$$DESTDIR$(prefix)					\
+	  --arch $(WIXL_ARCH)  -o $@ $<
+
+msi: spice-vdagent-$(WIXL_ARCH)-$(VERSION)$(BUILDID).msi
+
+CLEANFILES = spice-vdagent-$(WIXL_ARCH)-$(VERSION)$(BUILDID).msi
+
+.PHONY: msi
+
+EXTRA_DIST +=			\
 	$(top_srcdir)/.version	\
 	tests/clipboard.py	\
 	vdagent.sln		\

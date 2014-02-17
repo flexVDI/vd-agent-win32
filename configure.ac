@@ -9,10 +9,29 @@ AC_CONFIG_SRCDIR([vdagent])
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_AUX_DIR([build-aux])
+AC_CANONICAL_HOST
 
 AM_INIT_AUTOMAKE([1.11 foreign subdir-objects no-dist-gzip dist-xz tar-ustar])
 
 AM_SILENT_RULES([yes])
+
+AC_ARG_WITH([buildid],
+AS_HELP_STRING([--with-buildid=id], [Set additional build version details]))
+AC_DEFINE_UNQUOTED([BUILDID], "$with_buildid", [Build version details])
+if test "x$with_buildid" != x; then
+  AC_SUBST([BUILDID], "-$with_buildid")
+fi
+
+major=`echo $PACKAGE_VERSION | cut -d. -f1`
+minor=`echo $PACKAGE_VERSION | cut -d. -f2`
+micro=`echo $PACKAGE_VERSION | cut -d. -f3`
+buildid=`echo $with_buildid | cut -d. -f1`
+if test "x$buildid" = x; then
+  buildid=0
+fi
+build=`expr $micro \* 256 + $buildid`
+WINDOWS_PRODUCTVERSION="$major.$minor.$build"
+AC_SUBST([WINDOWS_PRODUCTVERSION])
 
 # Check for programs
 AC_PROG_CC
@@ -20,6 +39,16 @@ AC_PROG_CXX
 AM_PROG_CC_C_O
 AC_PROG_INSTALL
 AC_CHECK_TOOL(WINDRES, [windres])
+
+case "$host" in
+amd64*|x86_64*)
+  WIXL_ARCH="x64"
+;;
+*)
+  WIXL_ARCH="x86"
+;;
+esac
+AC_SUBST(WIXL_ARCH)
 
 AC_ARG_ENABLE([debug],
     AS_HELP_STRING([--enable-debug], [Enable debugging]))
@@ -75,6 +104,7 @@ AC_CONFIG_SUBDIRS([spice-protocol])
 AC_CONFIG_FILES([
 Makefile
 mingw-spice-vdagent.spec
+spice-vdagent.wxs
 ])
 AC_OUTPUT
 
