@@ -1051,9 +1051,10 @@ bool VDAgent::handle_clipboard_request(VDAgentClipboardRequest* clipboard_reques
     UINT format;
     HANDLE clip_data;
     uint8_t* new_data = NULL;
-    long new_size;
+    long new_size = 0;
     size_t len = 0;
     CxImage image;
+    VDAgentClipboard* clipboard = NULL;
 
     if (_clipboard_owner != owner_guest) {
         vd_printf("Received clipboard request from client while clipboard is not owned by guest");
@@ -1103,17 +1104,19 @@ bool VDAgent::handle_clipboard_request(VDAgentClipboardRequest* clipboard_reques
         break;
     }
     }
+
     if (!new_size) {
-        CloseClipboard();
-        return false;
+        vd_printf("clipboard is empty");
+        goto handle_clipboard_request_fail;
     }
+
     msg_size = sizeof(VDAgentMessage) + sizeof(VDAgentClipboard) + new_size;
     msg = (VDAgentMessage*)new uint8_t[msg_size];
     msg->protocol = VD_AGENT_PROTOCOL;
     msg->type = VD_AGENT_CLIPBOARD;
     msg->opaque = 0;
     msg->size = (uint32_t)(sizeof(VDAgentClipboard) + new_size);
-    VDAgentClipboard* clipboard = (VDAgentClipboard*)msg->data;
+    clipboard = (VDAgentClipboard*)msg->data;
     clipboard->type = clipboard_request->type;
 
     switch (clipboard_request->type) {
@@ -1132,6 +1135,13 @@ bool VDAgent::handle_clipboard_request(VDAgentClipboardRequest* clipboard_reques
     write_clipboard(msg, msg_size);
     delete[] (uint8_t *)msg;
     return true;
+
+handle_clipboard_request_fail:
+    if (clipboard_request->type == VD_AGENT_CLIPBOARD_UTF8_TEXT) {
+       GlobalUnlock(clip_data);
+    }
+    CloseClipboard();
+    return false;
 }
 
 void VDAgent::handle_clipboard_release()
