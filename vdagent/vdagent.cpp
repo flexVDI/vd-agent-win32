@@ -92,6 +92,7 @@ private:
     bool handle_clipboard_request(VDAgentClipboardRequest* clipboard_request);
     void handle_clipboard_release();
     bool handle_display_config(VDAgentDisplayConfig* display_config, uint32_t port);
+    bool handle_max_clipboard(VDAgentMaxClipboard *msg, uint32_t size);
     void handle_chunk(VDIChunk* chunk);
     void on_clipboard_grab();
     void on_clipboard_request(UINT format);
@@ -164,6 +165,7 @@ private:
     bool _display_setting_initialized;
     bool _logon_occured;
 
+    int32_t _max_clipboard;
     uint32_t *_client_caps;
     uint32_t _client_caps_size;
 
@@ -210,6 +212,7 @@ VDAgent::VDAgent()
     , _write_pos (0)
     , _logon_desktop (false)
     , _display_setting_initialized (false)
+    , _max_clipboard (-1)
     , _client_caps (NULL)
     , _client_caps_size (0)
     , _log (NULL)
@@ -799,6 +802,7 @@ bool VDAgent::send_announce_capabilities(bool request)
     VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_CLIPBOARD_BY_DEMAND);
     VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_SPARSE_MONITORS_CONFIG);
     VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_GUEST_LINEEND_CRLF);
+    VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_MAX_CLIPBOARD);
     vd_printf("Sending capabilities:");
     for (uint32_t i = 0 ; i < caps_size; ++i) {
         vd_printf("%X", caps->caps[i]);
@@ -871,6 +875,18 @@ bool VDAgent::handle_display_config(VDAgentDisplayConfig* display_config, uint32
     reply->type = VD_AGENT_DISPLAY_CONFIG;
     reply->error = VD_AGENT_SUCCESS;
     enqueue_chunk(reply_chunk);
+    return true;
+}
+
+bool VDAgent::handle_max_clipboard(VDAgentMaxClipboard *msg, uint32_t size)
+{
+    if (size != sizeof(VDAgentMaxClipboard)) {
+        vd_printf("VDAgentMaxClipboard: unexpected msg size %u (expected %u)",
+                  size, sizeof(VDAgentMaxClipboard));
+        return false;
+    }
+    vd_printf("Set max clipboard size: %d", msg->max);
+    _max_clipboard = msg->max;
     return true;
 }
 
@@ -1109,6 +1125,11 @@ bool VDAgent::handle_clipboard_request(VDAgentClipboardRequest* clipboard_reques
         vd_printf("clipboard is empty");
         goto handle_clipboard_request_fail;
     }
+    if ((_max_clipboard != -1) && (new_size > _max_clipboard)) {
+        vd_printf("clipboard is too large (%ld > %d), discarding",
+                  new_size, _max_clipboard);
+        goto handle_clipboard_request_fail;
+    }
 
     msg_size = sizeof(VDAgentMessage) + sizeof(VDAgentClipboard) + new_size;
     msg = (VDAgentMessage*)new uint8_t[msg_size];
@@ -1261,6 +1282,9 @@ void VDAgent::dispatch_message(VDAgentMessage* msg, uint32_t port)
     case VD_AGENT_CLIENT_DISCONNECTED:
         vd_printf("Client disconnected, agent to be restarted");
         set_control_event(CONTROL_STOP);
+        break;
+    case VD_AGENT_MAX_CLIPBOARD:
+        res = handle_max_clipboard((VDAgentMaxClipboard*)msg->data, msg->size);
         break;
     default:
         vd_printf("Unsupported message type %u size %u", msg->type, msg->size);
