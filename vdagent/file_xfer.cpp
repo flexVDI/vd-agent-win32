@@ -18,7 +18,14 @@
 #include <shlobj.h>
 #define __STDC_FORMAT_MACROS
 #define __USE_MINGW_ANSI_STDIO 1
+
+// compiler specific definitions
+#ifdef _MSC_VER // compiling with Visual Studio
+#define PRIu64 "I64u"
+#else // compiling with mingw
 #include <inttypes.h>
+#endif // compiler specific definitions
+
 #include <stdio.h>
 #include "file_xfer.h"
 #include "as_user.h"
