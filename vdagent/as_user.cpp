@@ -21,9 +21,9 @@
 #include <wtsapi32.h>
 
 AsUser::AsUser(DWORD session_id):
-    _started(false),
     _session_id(session_id),
-    _token(INVALID_HANDLE_VALUE)
+    _token(INVALID_HANDLE_VALUE),
+    _started(false)
 {
 }
 
