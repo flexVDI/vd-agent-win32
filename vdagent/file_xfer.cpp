@@ -76,7 +76,7 @@ void FileXfer::handle_start(VDAgentFileXferStartMessage* start,
     }
 
     if (strlen(file_path) + strlen(file_name) + 1 >= MAX_PATH) {
-        vd_printf("error: file too long %s\%s", file_path, file_name);
+        vd_printf("error: file too long %s\\%s", file_path, file_name);
         return;
     }
 
