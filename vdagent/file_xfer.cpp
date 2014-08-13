@@ -46,6 +46,7 @@ void FileXfer::handle_start(VDAgentFileXferStartMessage* start,
     uint64_t file_size;
     HANDLE handle;
     AsUser as_user;
+    int wlen;
 
     status->id = start->id;
     status->result = VD_AGENT_FILE_XFER_STATUS_ERROR;
@@ -81,7 +82,18 @@ void FileXfer::handle_start(VDAgentFileXferStartMessage* start,
 
     strcat(file_path, "\\");
     strcat(file_path, file_name);
-    handle = CreateFileA(file_path, GENERIC_WRITE, 0, NULL, CREATE_NEW, 0, NULL);
+    if((wlen = MultiByteToWideChar(CP_UTF8, 0, file_path, -1, NULL, 0)) == 0){
+        vd_printf("failed getting WideChar length of %s", file_path);
+        return;
+    }
+    TCHAR *wfile_path = new TCHAR[wlen];
+    if (MultiByteToWideChar(CP_UTF8, 0, file_path, -1, wfile_path, wlen) == 0){
+        vd_printf("failed converting file_path:%s to WindChar", file_path);
+        delete[] wfile_path;
+        return;
+    }
+    handle = CreateFile(wfile_path, GENERIC_WRITE, 0, NULL, CREATE_NEW, 0, NULL);
+    delete[] wfile_path;
     if (handle == INVALID_HANDLE_VALUE) {
         vd_printf("failed creating %s %lu", file_path, GetLastError());
         return;
