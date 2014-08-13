@@ -206,7 +206,7 @@ bool FileXfer::g_key_get_string(char* data, const char* group, const char* key, 
     snprintf(key_pfx, sizeof(key_pfx), "\n%s=", key);
     if (!(key_pos = strstr(group_pos, key_pfx))) return false;
 
-    next_group_pos = strstr(group_pos + strlen(group_pfx), "[");
+    next_group_pos = strstr(group_pos + strlen(group_pfx), "\n[");
     if (next_group_pos && key_pos > next_group_pos) return false;
 
     start = key_pos + strlen(key_pfx);
