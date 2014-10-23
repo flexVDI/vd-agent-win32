@@ -889,8 +889,8 @@ bool VDAgent::handle_display_config(VDAgentDisplayConfig* display_config, uint32
 bool VDAgent::handle_max_clipboard(VDAgentMaxClipboard *msg, uint32_t size)
 {
     if (size != sizeof(VDAgentMaxClipboard)) {
-        vd_printf("VDAgentMaxClipboard: unexpected msg size %u (expected %u)",
-                  size, sizeof(VDAgentMaxClipboard));
+        vd_printf("VDAgentMaxClipboard: unexpected msg size %u (expected %lu)",
+                  size, (unsigned long)sizeof(VDAgentMaxClipboard));
         return false;
     }
     vd_printf("Set max clipboard size: %d", msg->max);
