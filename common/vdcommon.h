@@ -65,7 +65,9 @@ typedef CRITICAL_SECTION mutex_t;
 #endif
 
 #ifdef OLDMSVCRT
+#ifndef _ftime_s
 #define _ftime_s(timeb) _ftime(timeb)
+#endif
 #endif
 
 enum SystemVersion {
