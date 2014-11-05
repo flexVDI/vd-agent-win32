@@ -43,6 +43,23 @@ typedef CRITICAL_SECTION mutex_t;
 #define ALIGN_VC __declspec (align(1))
 #endif
 
+/*
+ * Note: OLDMSVCRT, which is defined (in the Makefile) for mingw builds, and
+ * is not defined for Visual Studio builds.
+ *
+ * On Windows XP some those functions are missing from the msvcrt.dll
+ * When compiled with mingw, the program fails to run due to missing functions.
+ * One can link to a newer runtime dll, e.g. msvcr100.dll, but that would
+ * require installing that DLL on the guest. That can be done by downloading
+ * and installing Microsoft Visual C++ 2010 Redistributable Package.
+ * (same for 110.dll and 2012 Redistributable Package, etc).
+ *
+ * Since we do not want to add this dependency, we use functions that are
+ * available in msvcrt.dll (and use define in the code).
+ *
+ * Currently Visual Studio builds are built with /MT (static mode) such that
+ * those functions are not required to be in that dll on the guest.
+ */
 #ifdef OLDMSVCRT
 #define swprintf_s(buf, sz, format...) swprintf(buf, format)
 #endif
