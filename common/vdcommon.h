@@ -62,13 +62,11 @@ typedef CRITICAL_SECTION mutex_t;
  */
 #ifdef OLDMSVCRT
 #define swprintf_s(buf, sz, format...) swprintf(buf, format)
-#endif
 
-#ifdef OLDMSVCRT
 #ifndef _ftime_s
 #define _ftime_s(timeb) _ftime(timeb)
 #endif
-#endif
+#endif /* OLDMSVCRT */
 
 enum SystemVersion {
     SYS_VER_UNSUPPORTED,
