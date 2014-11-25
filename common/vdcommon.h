@@ -68,6 +68,10 @@ typedef CRITICAL_SECTION mutex_t;
 #endif
 #endif /* OLDMSVCRT */
 
+#ifdef _MSC_VER // compiling with Visual Studio
+#define snprintf         sprintf_s
+#endif
+
 enum SystemVersion {
     SYS_VER_UNSUPPORTED,
     SYS_VER_WIN_XP_CLASS, // also Server 2003/R2
