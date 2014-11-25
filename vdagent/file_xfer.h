@@ -25,6 +25,8 @@ typedef struct ALIGN_VC FileXferTask {
     FileXferTask(HANDLE _handle, uint64_t _size, char* _name):
     handle(_handle), size(_size), pos(0) {
         // FIXME: should raise an error if name is too long..
+        //        currently the only user is FileXfer::handle_start
+        //        which verifies that strlen(_name) < MAX_PATH
         strncpy(name, _name, sizeof(name) - 1);
     }
     HANDLE handle;
