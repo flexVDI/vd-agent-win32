@@ -129,7 +129,7 @@ private:
     static VDAgent* _singleton;
     HWND _hwnd;
     HWND _hwnd_next_viewer;
-    HMODULE _user_lib; 
+    HMODULE _user_lib;
     PCLIPBOARD_OP _add_clipboard_listener;
     PCLIPBOARD_OP _remove_clipboard_listener;
     int _system_version;
@@ -975,7 +975,7 @@ void VDAgent::on_clipboard_grab()
         while ((format = EnumClipboardFormats(format))) {
             vd_printf("Unsupported clipboard format %u", format);
         }
-    }  
+    }
 }
 
 // In delayed rendering, Windows requires us to SetClipboardData before we return from
@@ -1260,7 +1260,7 @@ void VDAgent::dispatch_message(VDAgentMessage* msg, uint32_t port)
         handle_clipboard((VDAgentClipboard*)msg->data, msg->size - sizeof(VDAgentClipboard));
         break;
     case VD_AGENT_CLIPBOARD_GRAB:
-        handle_clipboard_grab((VDAgentClipboardGrab*)msg->data, msg->size);        
+        handle_clipboard_grab((VDAgentClipboardGrab*)msg->data, msg->size);
         break;
     case VD_AGENT_CLIPBOARD_REQUEST:
         res = handle_clipboard_request((VDAgentClipboardRequest*)msg->data);
@@ -1407,7 +1407,7 @@ void VDAgent::write_completion(DWORD err, DWORD bytes, LPOVERLAPPED overlapped)
     if (count == 0) {
         a->_message_queue.pop();
         a->_write_pos = 0;
-        delete chunk;
+        delete[] (char *)chunk;
         if (!a->_message_queue.empty()) {
             chunk = a->_message_queue.front();
             count = sizeof(VDIChunk) + chunk->hdr.size;
