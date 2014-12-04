@@ -40,6 +40,8 @@ vdagent_SOURCES =			\
 	vdagent/vdagent.cpp		\
 	vdagent/as_user.cpp		\
 	vdagent/as_user.h		\
+	vdagent/port_forward.h		\
+	vdagent/port_forward.cpp	\
 	$(NULL)
 
 vdagent_rc.$(OBJEXT): vdagent/vdagent.rc

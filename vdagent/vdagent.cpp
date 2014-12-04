@@ -20,6 +20,7 @@
 #include "display_setting.h"
 #include "file_xfer.h"
 #include "ximage.h"
+#include "port_forward.h"
 #undef max
 #undef min
 #include <wtsapi32.h>
@@ -73,6 +74,8 @@ typedef struct ALIGN_VC VDIChunk {
 
 typedef BOOL (WINAPI *PCLIPBOARD_OP)(HWND);
 
+struct VDAgentSendPFCommand;
+
 class VDAgent {
 public:
     static VDAgent* get();
@@ -110,7 +113,7 @@ private:
     DWORD get_cximage_format(uint32_t type);
     enum { owner_none, owner_guest, owner_client };
     void set_clipboard_owner(int new_owner);
-    enum { CONTROL_STOP, CONTROL_DESKTOP_SWITCH, CONTROL_LOGON, CONTROL_CLIPBOARD };
+    enum { CONTROL_STOP, CONTROL_DESKTOP_SWITCH, CONTROL_LOGON, CONTROL_CLIPBOARD, CONTROL_DATA };
     void set_control_event(int control_command);
     void handle_control_event();
     VDIChunk* new_chunk(DWORD bytes = 0);
@@ -172,10 +175,55 @@ private:
 
     std::set<uint32_t> _grab_types;
 
+    PortForwarder *_pf;
+    friend struct VDAgentSendPFCommand;
+    VDAgentSendPFCommand * _send_command;
+
     VDLog* _log;
 };
 
 VDAgent* VDAgent::_singleton = NULL;
+
+struct VDAgentSendPFCommand : public PortForwarder::Sender {
+    std::list<VDIChunk *> commands;
+    mutex_t mutex;
+    VDAgentSendPFCommand() {
+        MUTEX_INIT(mutex);
+    }
+    ~VDAgentSendPFCommand() {}
+    void *get_buffer(size_t size) {
+        uint8_t* buffer = new uint8_t[VD_MESSAGE_HEADER_SIZE + size];
+        return buffer ? buffer + VD_MESSAGE_HEADER_SIZE : NULL;
+    }
+    void send(uint32_t type, size_t size, void* data) {
+        LOG(LOG_DEBUG, "Sending command %d with %d bytes", (int)type, (int)size);
+        uint8_t *buffer = ((uint8_t *)data) - VD_MESSAGE_HEADER_SIZE;
+        if (size) {
+            VDIChunk* msg_chunk = (VDIChunk *)buffer;
+            msg_chunk->hdr.port = VDP_CLIENT_PORT;
+            msg_chunk->hdr.size = sizeof(VDAgentMessage) + size;
+            VDAgentMessage* msg = (VDAgentMessage*)msg_chunk->data;
+            msg->protocol = VD_AGENT_PROTOCOL;
+            msg->type = type;
+            msg->opaque = 0;
+            msg->size = size;
+            MUTEX_LOCK(mutex);
+            commands.push_back(msg_chunk);
+            MUTEX_UNLOCK(mutex);
+            VDAgent::_singleton->set_control_event(VDAgent::CONTROL_DATA);
+        } else delete[] buffer;
+    }
+    VDIChunk *get_chunk() {
+        VDIChunk *result = NULL;
+        MUTEX_LOCK(mutex);
+        if (!commands.empty()) {
+            result = commands.front();
+            commands.pop_front();
+        }
+        MUTEX_UNLOCK(mutex);
+        return result;
+    }
+};
 
 #define VIOSERIAL_PORT_PATH L"\\\\.\\Global\\com.redhat.spice.0"
 
@@ -216,6 +264,8 @@ VDAgent::VDAgent()
     , _max_clipboard (-1)
     , _client_caps (NULL)
     , _client_caps_size (0)
+    , _pf(NULL)
+    , _send_command(NULL)
     , _log (NULL)
 {
     TCHAR log_path[MAX_PATH];
@@ -335,6 +385,8 @@ bool VDAgent::run()
         cleanup();
         return false;
     }
+    _send_command = new VDAgentSendPFCommand();
+    _pf = new PortForwarder(*_send_command);
     send_announce_capabilities(true);
     vd_printf("Connected to server");
 
@@ -357,6 +409,8 @@ void VDAgent::cleanup()
     CloseHandle(_control_event);
     CloseHandle(_vio_serial);
     delete _desktop_layout;
+    delete _pf;
+    delete _send_command;
 }
 
 void VDAgent::set_control_event(int control_command)
@@ -396,6 +450,9 @@ void VDAgent::handle_control_event()
             break;
         case CONTROL_CLIPBOARD:
             _clipboard_tick = 0;
+            break;
+        case CONTROL_DATA:
+            enqueue_chunk(_send_command->get_chunk());
             break;
         default:
             vd_printf("Unsupported control command %u", control_command);
@@ -811,6 +868,7 @@ bool VDAgent::send_announce_capabilities(bool request)
     VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_SPARSE_MONITORS_CONFIG);
     VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_GUEST_LINEEND_CRLF);
     VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_MAX_CLIPBOARD);
+    VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_PORT_FORWARDING);
     vd_printf("Sending capabilities:");
     for (uint32_t i = 0 ; i < caps_size; ++i) {
         vd_printf("%X", caps->caps[i]);
@@ -1293,6 +1351,14 @@ void VDAgent::dispatch_message(VDAgentMessage* msg, uint32_t port)
         break;
     case VD_AGENT_MAX_CLIPBOARD:
         res = handle_max_clipboard((VDAgentMaxClipboard*)msg->data, msg->size);
+        break;
+    case VD_AGENT_PORT_FORWARD_CLOSE:
+    case VD_AGENT_PORT_FORWARD_CONNECT:
+    case VD_AGENT_PORT_FORWARD_DATA:
+    case VD_AGENT_PORT_FORWARD_ACK:
+    case VD_AGENT_PORT_FORWARD_LISTEN:
+    case VD_AGENT_PORT_FORWARD_SHUTDOWN:
+        if (_pf) res = _pf->dispatch(msg->type, msg->data);
         break;
     default:
         vd_printf("Unsupported message type %u size %u", msg->type, msg->size);
