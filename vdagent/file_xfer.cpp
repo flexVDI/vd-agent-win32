@@ -205,7 +205,7 @@ bool FileXfer::g_key_get_string(char* data, const char* group, const char* key, 
 {
     char group_pfx[G_KEY_MAX_LEN], key_pfx[G_KEY_MAX_LEN];
     char *group_pos, *key_pos, *next_group_pos, *start, *end;
-    unsigned len;
+    size_t len;
 
     snprintf(group_pfx, sizeof(group_pfx), "[%s]", group);
     if (!(group_pos = strstr((char*)data, group_pfx))) return false;
