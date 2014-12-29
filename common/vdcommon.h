@@ -71,6 +71,8 @@ typedef CRITICAL_SECTION mutex_t;
 #ifdef _MSC_VER // compiling with Visual Studio
 #define snprintf         sprintf_s
 #define strncpy(d,s,n)   strcpy_s(s, __min(n+1, sizeof(d)), s)
+#define strcat(d,s)      strcat_s(d, sizeof(d), s)
+#define sscanf           sscanf_s
 #endif
 
 enum SystemVersion {
