@@ -22,6 +22,7 @@
 #pragma warning(disable:4200)
 #endif
 
+#include <errno.h>
 #include <windows.h>
 #include "spice/vd_agent.h"
 #include "vdlog.h"
@@ -67,6 +68,27 @@ typedef CRITICAL_SECTION mutex_t;
 #define _ftime_s(timeb) _ftime(timeb)
 #endif
 #endif /* OLDMSVCRT */
+
+#ifdef _MSC_VER // compiling with Visual Studio
+#define HAVE_STRCAT_S 1
+#define HAVE_STRCPY_S 1
+#endif
+
+#ifdef HAVE_STRCAT_S
+#define vdagent_strcat_s strcat_s
+#else
+errno_t vdagent_strcat_s(char *strDestination,
+                         size_t numberOfElements,
+                         const char *strSource);
+#endif
+
+#ifdef HAVE_STRCPY_S
+#define vdagent_strcpy_s strcpy_s
+#else
+errno_t vdagent_strcpy_s(char *strDestination,
+                         size_t numberOfElements,
+                         const char *strSource);
+#endif
 
 #ifdef _MSC_VER // compiling with Visual Studio
 #define snprintf         sprintf_s
