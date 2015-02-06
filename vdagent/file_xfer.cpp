@@ -87,8 +87,8 @@ void FileXfer::handle_start(VDAgentFileXferStartMessage* start,
         return;
     }
 
-    strcat(file_path, "\\");
-    strcat(file_path, file_name);
+    vdagent_strcat_s(file_path, sizeof(file_path), "\\");
+    vdagent_strcat_s(file_path, sizeof(file_path), file_name);
     if((wlen = MultiByteToWideChar(CP_UTF8, 0, file_path, -1, NULL, 0)) == 0){
         vd_printf("failed getting WideChar length of %s", file_path);
         return;
