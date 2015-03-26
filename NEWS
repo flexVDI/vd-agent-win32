@@ -1,5 +1,14 @@
+v0.7.3
+======
+- file-xfer: make user desktop the target directory
+- clipboard: Add VD_AGENT_CAP_MAX_CLIPBOARD support
+- build spice-vdagent MSI installer
+- Don't refresh displays config when updating (rhbz#1111144)
+- file-xfer: Fix dragging of files with CJK characters in name
+- fix building with Visual Studio
+- various cleanups
+
 v0.7.2
 ======
-
 - File transfer support
 - Convert line endings when needed
