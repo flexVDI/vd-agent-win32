@@ -1,6 +1,6 @@
 NULL =
-EXTRA_DIST =
-MAINTAINERCLEANFILES =
+EXTRA_DIST = mingw-spice-vdagent.spec
+MAINTAINERCLEANFILES = mingw-spice-vdagent.spec
 
 DIST_SUBDIRS = spice-protocol
 
