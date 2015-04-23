@@ -15,6 +15,7 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include <windows.h>
 #include <shlobj.h>
 #define __STDC_FORMAT_MACROS
 #define __USE_MINGW_ANSI_STDIO 1
