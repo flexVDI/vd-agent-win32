@@ -38,7 +38,7 @@ FileXfer::~FileXfer()
     for (iter = _tasks.begin(); iter != _tasks.end(); iter++) {
         task = iter->second;
         CloseHandle(task->handle);
-        DeleteFileA(task->name);
+        DeleteFile(task->name);
         delete task;
     }
 }
@@ -47,7 +47,8 @@ void FileXfer::handle_start(VDAgentFileXferStartMessage* start,
                             VDAgentFileXferStatusMessage* status)
 {
     char* file_meta = (char*)start->data;
-    char file_path[MAX_PATH], file_name[MAX_PATH];
+    TCHAR file_path[MAX_PATH];
+    char file_name[MAX_PATH];
     ULARGE_INTEGER free_bytes;
     FileXferTask* task;
     uint64_t file_size;
@@ -68,12 +69,12 @@ void FileXfer::handle_start(VDAgentFileXferStartMessage* start,
         return;
     }
 
-    if (FAILED(SHGetFolderPathA(NULL, CSIDL_DESKTOPDIRECTORY | CSIDL_FLAG_CREATE, NULL,
+    if (FAILED(SHGetFolderPath(NULL, CSIDL_DESKTOPDIRECTORY | CSIDL_FLAG_CREATE, NULL,
             SHGFP_TYPE_CURRENT, file_path))) {
         vd_printf("failed getting desktop path");
         return;
     }
-    if (!GetDiskFreeSpaceExA(file_path, &free_bytes, NULL, NULL)) {
+    if (!GetDiskFreeSpaceEx(file_path, &free_bytes, NULL, NULL)) {
         vd_printf("failed getting disk free space %lu", GetLastError());
         return;
     }
@@ -82,27 +83,23 @@ void FileXfer::handle_start(VDAgentFileXferStartMessage* start,
         return;
     }
 
-    if (strlen(file_path) + strlen(file_name) + 1 >= MAX_PATH) {
-        vd_printf("error: file too long %s\\%s", file_path, file_name);
+    wlen = _tcslen(file_path);
+    // make sure we have enough space
+    // (1 char for separator, 1 char for filename and 1 char for NUL terminator)
+    if (wlen + 3 >= MAX_PATH) {
+        vd_printf("error: file too long %ls\\%s", file_path, file_name);
         return;
     }
 
-    vdagent_strcat_s(file_path, sizeof(file_path), "\\");
-    vdagent_strcat_s(file_path, sizeof(file_path), file_name);
-    if((wlen = MultiByteToWideChar(CP_UTF8, 0, file_path, -1, NULL, 0)) == 0){
-        vd_printf("failed getting WideChar length of %s", file_path);
+    file_path[wlen++] = TEXT('\\');
+    file_path[wlen] = TEXT('\0');
+    if((wlen = MultiByteToWideChar(CP_UTF8, 0, file_name, -1, file_path + wlen, MAX_PATH - wlen)) == 0){
+        vd_printf("failed converting file_name:%s to WideChar", file_name);
         return;
     }
-    TCHAR *wfile_path = new TCHAR[wlen];
-    if (MultiByteToWideChar(CP_UTF8, 0, file_path, -1, wfile_path, wlen) == 0){
-        vd_printf("failed converting file_path:%s to WindChar", file_path);
-        delete[] wfile_path;
-        return;
-    }
-    handle = CreateFile(wfile_path, GENERIC_WRITE, 0, NULL, CREATE_NEW, 0, NULL);
-    delete[] wfile_path;
+    handle = CreateFile(file_path, GENERIC_WRITE, 0, NULL, CREATE_NEW, 0, NULL);
     if (handle == INVALID_HANDLE_VALUE) {
-        vd_printf("failed creating %s %lu", file_path, GetLastError());
+        vd_printf("failed creating %ls %lu", file_path, GetLastError());
         return;
     }
     task = new FileXferTask(handle, file_size, file_path);
@@ -145,7 +142,7 @@ fin:
     if (task) {
         CloseHandle(task->handle);
         if (status->result != VD_AGENT_FILE_XFER_STATUS_SUCCESS) {
-            DeleteFileA(task->name);
+            DeleteFile(task->name);
         }
         _tasks.erase(iter);
         delete task;
@@ -171,7 +168,7 @@ void FileXfer::handle_status(VDAgentFileXferStatusMessage* status)
     }
     task = iter->second;
     CloseHandle(task->handle);
-    DeleteFileA(task->name);
+    DeleteFile(task->name);
     _tasks.erase(iter);
     delete task;
 }
