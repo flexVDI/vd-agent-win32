@@ -41,6 +41,7 @@ public:
     void handle_accept(uint16_t port, SOCKET client);
     void handle_read(int id, VDAgentPortForwardDataMessage *msg, DWORD bytes);
     void handle_write(int id, DWORD bytes);
+    void handle_connect(int id);
 
 private:
     Sender& sender;
@@ -59,9 +60,10 @@ private:
         return 0;
     }
 
-    void listen_to(port_t port);
+    void listen_to(VDAgentPortForwardListenMessage &msg);
     void send_data(const VDAgentPortForwardDataMessage &msg);
     void remote_connected(VDAgentPortForwardConnectMessage &msg);
+    void connect_remote(VDAgentPortForwardConnectMessage &msg);
     void ack_data(VDAgentPortForwardAckMessage &msg);
     void start_closing(VDAgentPortForwardCloseMessage &msg);
     void shutdown_port(uint16_t port);

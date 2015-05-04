@@ -58,11 +58,12 @@ struct Connection {
     PortForwarder::conn_id_t id;
     SOCKET sock;
     bool closing;
+    bool acked;
     std::list<Buffer> write_buffer;
     uint32_t data_sent, data_received, ack_interval;
     static const uint32_t WINDOW_SIZE = 10*1024*1024;
 
-    Connection() : sock(INVALID_SOCKET), closing(false), data_sent(0),
+    Connection() : sock(INVALID_SOCKET), closing(false), acked(false), data_sent(0),
         data_received(0), ack_interval(0) {}
     ~Connection() {
         if (sock != INVALID_SOCKET) {
@@ -72,7 +73,7 @@ struct Connection {
         // TODO Cancel all pending operations on this connection
     }
 
-    static PortForwarder::conn_id_t getId(SOCKET sock);
+    static PortForwarder::conn_id_t generateConnectionId();
     void add_data_to_write_buffer(const uint8_t * data, size_t size) {
         write_buffer.push_back(Buffer());
         write_buffer.back().copy_data(data, size);
@@ -82,16 +83,10 @@ struct Connection {
     }
 };
 
-PortForwarder::conn_id_t Connection::getId(SOCKET sock)
+PortForwarder::conn_id_t Connection::generateConnectionId()
 {
-    SOCKADDR_IN addr;
-    int addr_len = sizeof(addr);
-    if (!getpeername(sock, (SOCKADDR *)&addr, &addr_len)) {
-        return ntohs(addr.sin_port);
-    } else {
-        LOG(LOG_DEBUG, "getpeername on socket %d failed: %s", sock, getErrorMessage(WSAGetLastError()));
-        return -1;
-    }
+    static uint32_t seq = 0;
+    return ++seq;
 }
 
 struct Acceptor {
@@ -278,6 +273,56 @@ struct WriteOperation : public OverlappedOperation {
     }
 };
 
+struct ConnectOperation : public OverlappedOperation {
+    int id;
+
+    ConnectOperation() : OverlappedOperation() {
+        LOG(LOG_DEBUG, "Created connect operation %p", this);
+    }
+    virtual ~ConnectOperation() {}
+    virtual void handle_to(PortForwarder &pf, DWORD bytes) {
+        pf.handle_connect(id);
+    }
+    static const GUID connectex_guid;
+    bool connect_ex(SOCKET sock, const SOCKADDR_IN &addr) {
+        static LPFN_CONNECTEX real_connect_ex =
+                (LPFN_CONNECTEX)load_function(sock, connectex_guid);
+        if (real_connect_ex) {
+            LOG(LOG_DEBUG, "Calling connect_ex for operation %p", this);
+            return real_connect_ex(sock, (const sockaddr*)&addr, sizeof(addr),
+                                   NULL, 0, NULL, this);
+        } else {
+            WSASetLastError(WSASYSCALLFAILURE);
+            return false;
+        }
+    }
+    static bool post(Connection & conn, const SOCKADDR_IN & serv_addr, HANDLE iocp) {
+        SOCKADDR_IN host_addr;
+        std::fill_n((char *)&host_addr, sizeof(host_addr), 0);
+        host_addr.sin_family = AF_INET;
+        host_addr.sin_addr.s_addr = INADDR_ANY;
+        host_addr.sin_port = 0;
+        if (bind(conn.sock, (const sockaddr *)&host_addr, sizeof(host_addr)) == SOCKET_ERROR) {
+            LOG(LOG_ERROR, "Could not bind to local port on connect");
+            return false;
+        }
+        ConnectOperation *operation = new ConnectOperation;
+        operation->id = conn.id;
+        if (!operation->connect_ex(conn.sock, serv_addr)) {
+            if (!operation->check_pending()) {
+                // TODO: Error
+                LOG(LOG_DEBUG, "Posting connect operation %p failed", operation);
+                delete operation;
+                return false;
+            }
+        } else
+            LOG(LOG_DEBUG, "Connect operation %p completed synchronously", operation);
+        // TODO: Post?
+        return true;
+    }
+};
+const GUID ConnectOperation::connectex_guid = WSAID_CONNECTEX;
+
 PortForwarder::PortForwarder(Sender& s)
     : sender(s), has_client(true)
 {
@@ -339,23 +384,18 @@ void PortForwarder::handle_accept(uint16_t port, SOCKET client)
     char update_context[sizeof(DWORD)];
     *((DWORD *)update_context) = acceptor.sock;
     setsockopt(client, SOL_SOCKET, SO_UPDATE_ACCEPT_CONTEXT, update_context, sizeof(DWORD));
-    conn_id_t id = Connection::getId(client);
-    if (id != -1) {
-        LOG(LOG_DEBUG, "Connection %d accepted on port %d", id, port);
-        Connection &conn = connections[id];
-        conn.sock = client;
-        conn.id = id;
-        CreateIoCompletionPort((HANDLE)client, iocp, 0, 0);
-        VDAgentPortForwardConnectMessage *msg =
-            sender.get_buffer<VDAgentPortForwardConnectMessage>();
-        msg->port = port;
-        msg->id = id;
-        msg->ack_interval = Connection::WINDOW_SIZE/2;
-        sender.send(VD_AGENT_PORT_FORWARD_CONNECT, msg);
-    } else {
-        LOG(LOG_DEBUG, "Cannont obtain id of connection accepted on port %d", port);
-        // TODO: Error
-    }
+    conn_id_t id = Connection::generateConnectionId();
+    LOG(LOG_DEBUG, "Connection %d accepted on port %d", id, port);
+    Connection &conn = connections[id];
+    conn.sock = client;
+    conn.id = id;
+    CreateIoCompletionPort((HANDLE)client, iocp, 0, 0);
+    VDAgentPortForwardAcceptedMessage *msg =
+        sender.get_buffer<VDAgentPortForwardAcceptedMessage>();
+    msg->port = port;
+    msg->id = id;
+    msg->ack_interval = Connection::WINDOW_SIZE / 2;
+    sender.send(VD_AGENT_PORT_FORWARD_ACCEPTED, msg);
     AcceptOperation::post(acceptor, iocp);
 }
 
@@ -426,19 +466,59 @@ void PortForwarder::handle_write(int id, DWORD bytes)
     }
 }
 
-void PortForwarder::remote_connected(VDAgentPortForwardConnectMessage& msg)
+void PortForwarder::handle_connect(int id)
 {
-    conn_iter connit = connections.find(msg.id);
+    conn_iter connit = connections.find(id);
     if (connit == connections.end()) {
-        LOG(LOG_ERROR, "Unknown connection %d from client CONNECT", msg.id);
+        LOG(LOG_ERROR, "Unknown connection %d in operation %p", id, this);
         // TODO: Error
+        return;
     } else {
         Connection &conn = connit->second;
-        conn.ack_interval = msg.ack_interval;
+        conn.acked = TRUE;
+        LOG(LOG_DEBUG, "Connection established with id %d", id);
+        VDAgentPortForwardAckMessage *ackMsg =
+            sender.get_buffer<VDAgentPortForwardAckMessage>();
+        ackMsg->id = id;
+        ackMsg->size = Connection::WINDOW_SIZE / 2;
+        sender.send(VD_AGENT_PORT_FORWARD_ACK, ackMsg);
         // Program a read operation
         if (!ReadOperation::post(conn, iocp, sender)) {
             // TODO: Error
         }
+    }
+}
+
+void PortForwarder::connect_remote(VDAgentPortForwardConnectMessage& msg)
+{
+    SOCKADDR_IN serv_addr;
+    int addr_len = sizeof(serv_addr);
+    std::fill_n((char *)&serv_addr, addr_len, 0);
+    int id = msg.id;
+    int port = msg.port;
+
+    // TODO: gethostbyname is potentially blocking...
+    struct hostent *server = gethostbyname(msg.host);
+    if (!server) {
+        LOG(LOG_WARN, "Host %s not found", msg.host);
+        return;
+    }
+    serv_addr.sin_family = AF_INET;
+    std::copy((char *)server->h_addr, (char *)server->h_addr + server->h_length,
+              (char *)&serv_addr.sin_addr.s_addr);
+    serv_addr.sin_port = htons(port);
+
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd != INVALID_SOCKET) {
+        LOG(LOG_DEBUG, "Connecting ID %d to %s:%d", id, msg.host, port);
+        Connection &conn = connections[id];
+        conn.sock = sockfd;
+        conn.id = id;
+        conn.ack_interval = msg.ack_interval;
+        CreateIoCompletionPort((HANDLE)conn.sock, iocp, 0, 0);
+        ConnectOperation::post(conn, serv_addr, iocp);
+    } else {
+        LOG(LOG_WARN, "Error creating socket");
     }
 }
 
@@ -450,10 +530,19 @@ void PortForwarder::ack_data(VDAgentPortForwardAckMessage& msg)
         // TODO: Error
     } else {
         Connection &conn = connit->second;
-        uint32_t data_sent_before = conn.data_sent;
-        conn.data_sent -= msg.size;
-        if (conn.data_sent < Connection::WINDOW_SIZE &&
-            data_sent_before >= Connection::WINDOW_SIZE) {
+        if (conn.acked) {
+            uint32_t data_sent_before = conn.data_sent;
+            conn.data_sent -= msg.size;
+            if (conn.data_sent < Connection::WINDOW_SIZE &&
+                    data_sent_before >= Connection::WINDOW_SIZE) {
+                // Program a read operation
+                if (!ReadOperation::post(conn, iocp, sender)) {
+                    // TODO: Error
+                }
+            }
+        } else {
+            conn.acked = true;
+            conn.ack_interval = msg.size;
             // Program a read operation
             if (!ReadOperation::post(conn, iocp, sender)) {
                 // TODO: Error
@@ -473,40 +562,47 @@ void PortForwarder::start_closing(VDAgentPortForwardCloseMessage& msg)
         LOG(LOG_DEBUG, "Client closed connection %d", msg.id);
         if (!conn.write_buffer.empty()) {
             conn.closing = true;
+            conn.acked = false;
         } else {
             connections.erase(connit);
         }
     }
 }
 
-void PortForwarder::listen_to(port_t port)
+void PortForwarder::listen_to(VDAgentPortForwardListenMessage& msg)
 {
     SOCKET sock;
-    char true_placeholder[sizeof(BOOL)];
     SOCKADDR_IN addr;
+    LOG(LOG_DEBUG, "Listening to %s:%d", msg.bind_address, (int)msg.port);
 
-    if (acceptors.find(port) != acceptors.end()) {
-        LOG(LOG_INFO, "Already listening to port %d", (int)port);
+    if (acceptors.find(msg.port) != acceptors.end()) {
+        LOG(LOG_INFO, "Already listening to port %d", (int)msg.port);
     } else {
-        *((BOOL *)true_placeholder) = 1;
+        // TODO: gethostbyname is potentially blocking...
+        struct hostent *host = gethostbyname(msg.bind_address);
+        if (!host) {
+            LOG(LOG_WARN, "Host %s not found", msg.bind_address);
+            return;
+        }
         addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-        addr.sin_port = htons(port);
+        std::copy((char *)host->h_addr, (char *)host->h_addr + host->h_length,
+                  (char *)&addr.sin_addr.s_addr);
+        addr.sin_port = htons(msg.port);
         sock = socket(AF_INET, SOCK_STREAM, 0);
-        // TODO: set zero TCP buffer
+        char true_placeholder[sizeof(BOOL)];
+        *((BOOL *)true_placeholder) = 1;
         if (sock == INVALID_SOCKET ||
             setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, true_placeholder, sizeof(BOOL)) ||
             bind(sock, (LPSOCKADDR) &addr, sizeof(addr)) == SOCKET_ERROR ||
-            //setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, true_placeholder, sizeof(BOOL)) ||
+            setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, true_placeholder, sizeof(BOOL)) ||
             listen(sock, 5)) {
-            LOG(LOG_ERROR, "Failed to listen to port %d: %s", port,
+            LOG(LOG_ERROR, "Failed to listen to port %d: %s", (int)msg.port,
                 getErrorMessage(WSAGetLastError()));
         } else {
             CreateIoCompletionPort((HANDLE)sock, iocp, 0, 0);
-            Acceptor &acceptor = acceptors[port];
+            Acceptor &acceptor = acceptors[msg.port];
             acceptor.sock = sock;
-            acceptor.port = port;
-            LOG(LOG_DEBUG, "Listening to port %d", (int)port);
+            acceptor.port = msg.port;
             if (!AcceptOperation::post(acceptor, iocp)) {
                 // TODO: Error
             }
@@ -551,10 +647,10 @@ bool PortForwarder::dispatch(uint32_t command, void* data)
     ScopedLock lock(mutex);
     switch (command) {
         case VD_AGENT_PORT_FORWARD_LISTEN:
-            listen_to(((VDAgentPortForwardListenMessage *)data)->port);
+            listen_to(*(VDAgentPortForwardListenMessage *)data);
             break;
         case VD_AGENT_PORT_FORWARD_CONNECT:
-            remote_connected(*(VDAgentPortForwardConnectMessage *)data);
+            connect_remote(*(VDAgentPortForwardConnectMessage *)data);
             break;
         case VD_AGENT_PORT_FORWARD_DATA:
             send_data(*(VDAgentPortForwardDataMessage *)data);
