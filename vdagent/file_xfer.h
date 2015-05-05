@@ -22,15 +22,18 @@
 #include "vdcommon.h"
 
 typedef struct ALIGN_VC FileXferTask {
-    FileXferTask(HANDLE _handle, uint64_t _size, char* _name):
+    FileXferTask(HANDLE _handle, uint64_t _size, const TCHAR* _name):
     handle(_handle), size(_size), pos(0) {
         // FIXME: should raise an error if name is too long..
-        strncpy(name, _name, sizeof(name) - 1);
+        //        currently the only user is FileXfer::handle_start
+        //        which verifies that _tcslen(_name) < MAX_PATH
+        lstrcpyn(name, _name, ARRAYSIZE(name));
+        name[ARRAYSIZE(name)-1] = 0;
     }
     HANDLE handle;
     uint64_t size;
     uint64_t pos;
-    char name[MAX_PATH];
+    TCHAR name[MAX_PATH];
 } ALIGN_GCC FileXferTask;
 
 typedef std::map<uint32_t, FileXferTask*> FileXferTasks;

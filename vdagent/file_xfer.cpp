@@ -15,10 +15,18 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include <windows.h>
 #include <shlobj.h>
 #define __STDC_FORMAT_MACROS
 #define __USE_MINGW_ANSI_STDIO 1
+
+// compiler specific definitions
+#ifdef _MSC_VER // compiling with Visual Studio
+#define PRIu64 "I64u"
+#else // compiling with mingw
 #include <inttypes.h>
+#endif // compiler specific definitions
+
 #include <stdio.h>
 #include "file_xfer.h"
 #include "as_user.h"
@@ -31,7 +39,7 @@ FileXfer::~FileXfer()
     for (iter = _tasks.begin(); iter != _tasks.end(); iter++) {
         task = iter->second;
         CloseHandle(task->handle);
-        DeleteFileA(task->name);
+        DeleteFile(task->name);
         delete task;
     }
 }
@@ -40,12 +48,14 @@ void FileXfer::handle_start(VDAgentFileXferStartMessage* start,
                             VDAgentFileXferStatusMessage* status)
 {
     char* file_meta = (char*)start->data;
-    char file_path[MAX_PATH], file_name[MAX_PATH];
+    TCHAR file_path[MAX_PATH];
+    char file_name[MAX_PATH];
     ULARGE_INTEGER free_bytes;
     FileXferTask* task;
     uint64_t file_size;
     HANDLE handle;
     AsUser as_user;
+    int wlen;
 
     status->id = start->id;
     status->result = VD_AGENT_FILE_XFER_STATUS_ERROR;
@@ -60,12 +70,12 @@ void FileXfer::handle_start(VDAgentFileXferStartMessage* start,
         return;
     }
 
-    if (FAILED(SHGetFolderPathA(NULL, CSIDL_DESKTOPDIRECTORY | CSIDL_FLAG_CREATE, NULL,
+    if (FAILED(SHGetFolderPath(NULL, CSIDL_DESKTOPDIRECTORY | CSIDL_FLAG_CREATE, NULL,
             SHGFP_TYPE_CURRENT, file_path))) {
         vd_printf("failed getting desktop path");
         return;
     }
-    if (!GetDiskFreeSpaceExA(file_path, &free_bytes, NULL, NULL)) {
+    if (!GetDiskFreeSpaceEx(file_path, &free_bytes, NULL, NULL)) {
         vd_printf("failed getting disk free space %lu", GetLastError());
         return;
     }
@@ -74,16 +84,23 @@ void FileXfer::handle_start(VDAgentFileXferStartMessage* start,
         return;
     }
 
-    if (strlen(file_path) + strlen(file_name) + 1 >= MAX_PATH) {
-        vd_printf("error: file too long %s\%s", file_path, file_name);
+    wlen = _tcslen(file_path);
+    // make sure we have enough space
+    // (1 char for separator, 1 char for filename and 1 char for NUL terminator)
+    if (wlen + 3 >= MAX_PATH) {
+        vd_printf("error: file too long %ls\\%s", file_path, file_name);
         return;
     }
 
-    strcat(file_path, "\\");
-    strcat(file_path, file_name);
-    handle = CreateFileA(file_path, GENERIC_WRITE, 0, NULL, CREATE_NEW, 0, NULL);
+    file_path[wlen++] = TEXT('\\');
+    file_path[wlen] = TEXT('\0');
+    if((wlen = MultiByteToWideChar(CP_UTF8, 0, file_name, -1, file_path + wlen, MAX_PATH - wlen)) == 0){
+        vd_printf("failed converting file_name:%s to WideChar", file_name);
+        return;
+    }
+    handle = CreateFile(file_path, GENERIC_WRITE, 0, NULL, CREATE_NEW, 0, NULL);
     if (handle == INVALID_HANDLE_VALUE) {
-        vd_printf("failed creating %s %lu", file_path, GetLastError());
+        vd_printf("failed creating %ls %lu", file_path, GetLastError());
         return;
     }
     task = new FileXferTask(handle, file_size, file_path);
@@ -126,7 +143,7 @@ fin:
     if (task) {
         CloseHandle(task->handle);
         if (status->result != VD_AGENT_FILE_XFER_STATUS_SUCCESS) {
-            DeleteFileA(task->name);
+            DeleteFile(task->name);
         }
         _tasks.erase(iter);
         delete task;
@@ -152,7 +169,7 @@ void FileXfer::handle_status(VDAgentFileXferStatusMessage* status)
     }
     task = iter->second;
     CloseHandle(task->handle);
-    DeleteFileA(task->name);
+    DeleteFile(task->name);
     _tasks.erase(iter);
     delete task;
 }
@@ -186,7 +203,7 @@ bool FileXfer::g_key_get_string(char* data, const char* group, const char* key, 
 {
     char group_pfx[G_KEY_MAX_LEN], key_pfx[G_KEY_MAX_LEN];
     char *group_pos, *key_pos, *next_group_pos, *start, *end;
-    unsigned len;
+    size_t len;
 
     snprintf(group_pfx, sizeof(group_pfx), "[%s]", group);
     if (!(group_pos = strstr((char*)data, group_pfx))) return false;
@@ -194,7 +211,7 @@ bool FileXfer::g_key_get_string(char* data, const char* group, const char* key, 
     snprintf(key_pfx, sizeof(key_pfx), "\n%s=", key);
     if (!(key_pos = strstr(group_pos, key_pfx))) return false;
 
-    next_group_pos = strstr(group_pos + strlen(group_pfx), "[");
+    next_group_pos = strstr(group_pos + strlen(group_pfx), "\n[");
     if (next_group_pos && key_pos > next_group_pos) return false;
 
     start = key_pos + strlen(key_pfx);
