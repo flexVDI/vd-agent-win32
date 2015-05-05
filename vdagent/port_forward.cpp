@@ -225,7 +225,7 @@ struct ReadOperation : public OverlappedOperation {
     virtual void handle_to(PortForwarder &pf, DWORD bytes) {
         pf.handle_read(id, (VDAgentPortForwardDataMessage *)data_msg_buffer, bytes);
     }
-    static bool post(Connection & conn, HANDLE iocp, PortForwarder::Sender &sender) {
+    static bool post(Connection & conn, PortForwarder::Sender &sender) {
         char *read_buffer = (char *)sender.get_buffer(MAX_MSG_SIZE);
         ReadOperation *operation = new ReadOperation(read_buffer);
         operation->id = conn.id;
@@ -255,7 +255,7 @@ struct WriteOperation : public OverlappedOperation {
     virtual void handle_to(PortForwarder &pf, DWORD bytes) {
         pf.handle_write(id, bytes);
     }
-    static bool post(Connection & conn, HANDLE iocp) {
+    static bool post(Connection & conn) {
         WriteOperation *operation = new WriteOperation;
         operation->id = conn.id;
         conn.getWSABuffer(operation->buffer);
@@ -297,6 +297,7 @@ struct ConnectOperation : public OverlappedOperation {
         }
     }
     static bool post(Connection & conn, const SOCKADDR_IN & serv_addr, HANDLE iocp) {
+        CreateIoCompletionPort((HANDLE)conn.sock, iocp, 0, 0);
         SOCKADDR_IN host_addr;
         std::fill_n((char *)&host_addr, sizeof(host_addr), 0);
         host_addr.sin_family = AF_INET;
@@ -317,7 +318,6 @@ struct ConnectOperation : public OverlappedOperation {
             }
         } else
             LOG(LOG_DEBUG, "Connect operation %p completed synchronously", operation);
-        // TODO: Post?
         return true;
     }
 };
@@ -425,7 +425,7 @@ void PortForwarder::handle_read(int id, VDAgentPortForwardDataMessage *msg, DWOR
         sender.send(VD_AGENT_PORT_FORWARD_DATA, bytes + ReadOperation::DATA_HEAD_SIZE, msg);
         conn.data_sent += bytes;
         if (conn.data_sent < Connection::WINDOW_SIZE) {
-            if (!ReadOperation::post(conn, iocp, sender)) {
+            if (!ReadOperation::post(conn, sender)) {
                 // TODO: Error
             }
         }
@@ -460,7 +460,7 @@ void PortForwarder::handle_write(int id, DWORD bytes)
             conn.write_buffer.pop_front();
         }
         if (!conn.write_buffer.empty()) {
-            if (!WriteOperation::post(conn, iocp)) {
+            if (!WriteOperation::post(conn)) {
                 // TODO: Error
             }
         } else if (conn.closing) {
@@ -486,7 +486,7 @@ void PortForwarder::handle_connect(int id)
         ackMsg->size = Connection::WINDOW_SIZE / 2;
         sender.send(VD_AGENT_PORT_FORWARD_ACK, ackMsg);
         // Program a read operation
-        if (!ReadOperation::post(conn, iocp, sender)) {
+        if (!ReadOperation::post(conn, sender)) {
             // TODO: Error
         }
     }
@@ -518,7 +518,6 @@ void PortForwarder::connect_remote(VDAgentPortForwardConnectMessage& msg)
         conn.sock = sockfd;
         conn.id = id;
         conn.ack_interval = msg.ack_interval;
-        CreateIoCompletionPort((HANDLE)conn.sock, iocp, 0, 0);
         ConnectOperation::post(conn, serv_addr, iocp);
     } else {
         LOG(LOG_WARN, "Error creating socket");
@@ -539,7 +538,7 @@ void PortForwarder::ack_data(VDAgentPortForwardAckMessage& msg)
             if (conn.data_sent < Connection::WINDOW_SIZE &&
                     data_sent_before >= Connection::WINDOW_SIZE) {
                 // Program a read operation
-                if (!ReadOperation::post(conn, iocp, sender)) {
+                if (!ReadOperation::post(conn, sender)) {
                     // TODO: Error
                 }
             }
@@ -547,7 +546,7 @@ void PortForwarder::ack_data(VDAgentPortForwardAckMessage& msg)
             conn.acked = true;
             conn.ack_interval = msg.size;
             // Program a read operation
-            if (!ReadOperation::post(conn, iocp, sender)) {
+            if (!ReadOperation::post(conn, sender)) {
                 // TODO: Error
             }
         }
@@ -621,7 +620,7 @@ void PortForwarder::send_data(const VDAgentPortForwardDataMessage& msg)
             Connection & conn = it->second;
             conn.add_data_to_write_buffer(msg.data, msg.size);
             if (conn.write_buffer.size() == 1) {
-                if (!WriteOperation::post(conn, iocp)) {
+                if (!WriteOperation::post(conn)) {
                     // TODO: Error
                 }
             }
