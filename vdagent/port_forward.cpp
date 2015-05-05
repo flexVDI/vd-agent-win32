@@ -343,9 +343,10 @@ PortForwarder::~PortForwarder()
         connections.clear();
         acceptors.clear();
     }
+    PostQueuedCompletionStatus(iocp, 0, 0, NULL);
+    CloseHandle(iocp);
     WaitForSingleObject(iocpThread, INFINITE);
     CloseHandle(iocpThread);
-    CloseHandle(iocp);
     WSACleanup();
 }
 
@@ -358,16 +359,18 @@ void PortForwarder::handle_io_events()
         LPOVERLAPPED overlapped = NULL;
         bool success = GetQueuedCompletionStatus(iocp, &bytes, &key, &overlapped, INFINITE);
         OverlappedOperation * operation = static_cast<OverlappedOperation *>(overlapped);
-        if (!success || !operation) {
-            // Operation failed (probably canceled)
-            LOG(LOG_DEBUG, "IO operation %p failed: %s", operation,
-                getErrorMessage(WSAGetLastError()));
-        } else {
-            LOG(LOG_DEBUG, "IO operation %p finished", operation);
-            ScopedLock lock(mutex);
-            operation->handle_to(*this, bytes);
+        if (operation) {
+            if (!success) {
+                // Operation failed (probably canceled)
+                LOG(LOG_DEBUG, "IO operation %p failed: %s", operation,
+                    getErrorMessage(WSAGetLastError()));
+            } else {
+                LOG(LOG_DEBUG, "IO operation %p finished", operation);
+                ScopedLock lock(mutex);
+                operation->handle_to(*this, bytes);
+            }
+            delete operation;
         }
-        delete operation;
     }
     LOG(LOG_INFO, "Ending port forwarding thread.");
 }
