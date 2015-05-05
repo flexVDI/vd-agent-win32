@@ -282,6 +282,7 @@ VDAgent::VDAgent()
     ZeroMemory(_read_buf, sizeof(_read_buf));
     MUTEX_INIT(_control_mutex);
     MUTEX_INIT(_message_mutex);
+    _send_command = new VDAgentSendPFCommand();
 
     _singleton = this;
 }
@@ -385,7 +386,6 @@ bool VDAgent::run()
         cleanup();
         return false;
     }
-    _send_command = new VDAgentSendPFCommand();
     _pf = new PortForwarder(*_send_command);
     send_announce_capabilities(true);
     vd_printf("Connected to server");
