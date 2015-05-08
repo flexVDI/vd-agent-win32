@@ -355,7 +355,7 @@ void PortForwarder::handle_io_events()
     LOG(LOG_INFO, "Starting port forwarding thread.");
     while (has_client) {
         DWORD bytes;
-        ULONG key;
+        ULONG_PTR key;
         LPOVERLAPPED overlapped = NULL;
         bool success = GetQueuedCompletionStatus(iocp, &bytes, &key, &overlapped, INFINITE);
         OverlappedOperation * operation = static_cast<OverlappedOperation *>(overlapped);
