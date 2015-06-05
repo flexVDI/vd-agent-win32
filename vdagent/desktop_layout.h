@@ -31,6 +31,7 @@ public:
         , _depth (depth)
         , _attached (attached)
     {
+        _primary = (pos_x == 0 && pos_y == 0 && attached);
     }
 
     LONG get_pos_x() { return _pos_x;}
@@ -44,6 +45,7 @@ public:
     void set_res(DWORD width, DWORD height, DWORD depth);
     void set_depth(DWORD depth) { _depth = depth;}
     void set_attached(bool attached) { _attached = attached;}
+    bool is_primary() { return _primary; }
 
 private:
     LONG _pos_x;
@@ -52,6 +54,7 @@ private:
     DWORD _height;
     DWORD _depth;
     bool _attached;
+    bool _primary;
 
     friend class DesktopLayout;
 };
@@ -74,10 +77,12 @@ public:
 private:
     void clean_displays();
     void normalize_displays_pos();
+    DisplayMode * get_primary_display();
     static bool consistent_displays();
     static bool is_attached(LPCTSTR dev_name);
     static bool get_qxl_device_id(WCHAR* device_key, DWORD* device_id);
-    static bool init_dev_mode(LPCTSTR dev_name, DEVMODE* dev_mode, DisplayMode* mode, bool set_pos);
+    static bool init_dev_mode(LPCTSTR dev_name, DEVMODE* dev_mode, DisplayMode* mode,
+                              LONG normal_x, LONG normal_y, bool set_pos);
 
 private:
     mutex_t _mutex;

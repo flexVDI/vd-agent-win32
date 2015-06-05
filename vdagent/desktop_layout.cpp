@@ -90,6 +90,21 @@ void DesktopLayout::get_displays()
     unlock();
 }
 
+DisplayMode * DesktopLayout::get_primary_display()
+{
+    DisplayMode * mode;
+
+    for (unsigned int i = 0; i < get_display_count(); i++)
+    {
+        mode = _displays.at(i);
+        if (!mode)
+            continue;
+        if (mode->is_primary())
+            return mode;
+    }
+    return NULL;
+}
+
 void DesktopLayout::set_displays()
 {
     DISPLAY_DEVICE dev_info;
@@ -107,6 +122,12 @@ void DesktopLayout::set_displays()
     dev_info.cb = sizeof(dev_info);
     ZeroMemory(&dev_mode, sizeof(dev_mode));
     dev_mode.dmSize = sizeof(dev_mode);
+
+    //Get the normalized position of the primary monitor
+    DisplayMode * primary(get_primary_display());
+    LONG normal_x = primary ? primary->get_pos_x() : 0;
+    LONG normal_y = primary ? primary->get_pos_y() : 0;
+
     while (EnumDisplayDevices(NULL, dev_id, &dev_info, 0)) {
         dev_id++;
         if (dev_info.StateFlags & DISPLAY_DEVICE_MIRRORING_DRIVER) {
@@ -121,7 +142,8 @@ void DesktopLayout::set_displays()
             vd_printf("display_id %lu out of range, #displays %zu" , display_id, _displays.size());
             break;
         }
-        if (!init_dev_mode(dev_info.DeviceName, &dev_mode, _displays.at(display_id), true)) {
+        if (!init_dev_mode(dev_info.DeviceName, &dev_mode, _displays.at(display_id),
+                           normal_x, normal_y, true)) {
             vd_printf("No suitable mode found for display %S", dev_info.DeviceName);
             break;
         }
@@ -240,7 +262,7 @@ bool DesktopLayout::get_qxl_device_id(WCHAR* device_key, DWORD* device_id)
 }
 
 bool DesktopLayout::init_dev_mode(LPCTSTR dev_name, DEVMODE* dev_mode, DisplayMode* mode,
-                                  bool set_pos)
+                                  LONG normal_x, LONG normal_y, bool set_pos)
 {
     DWORD closest_diff = -1;
     DWORD best = -1;
@@ -320,8 +342,9 @@ bool DesktopLayout::init_dev_mode(LPCTSTR dev_name, DEVMODE* dev_mode, DisplayMo
     }
     dev_mode->dmFields = DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT;
     if (set_pos) {
-        dev_mode->dmPosition.x = mode->_pos_x;
-        dev_mode->dmPosition.y = mode->_pos_y;
+        //Convert the position so that the primary is always at (0,0)
+        dev_mode->dmPosition.x = mode->_pos_x - normal_x;
+        dev_mode->dmPosition.y = mode->_pos_y - normal_y;
         dev_mode->dmFields |= DM_POSITION;
     }
 
