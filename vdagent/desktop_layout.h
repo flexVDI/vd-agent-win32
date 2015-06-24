@@ -83,7 +83,7 @@ private:
     static bool get_qxl_device_id(WCHAR* device_key, DWORD* device_id);
     static bool init_dev_mode(LPCTSTR dev_name, DEVMODE* dev_mode, DisplayMode* mode,
                               LONG normal_x, LONG normal_y, bool set_pos);
-
+    static bool update_monitor_config(LPCTSTR dev_name, DisplayMode* mode);
 private:
     mutex_t _mutex;
     Displays _displays;

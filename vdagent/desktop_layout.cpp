@@ -16,6 +16,7 @@
 */
 
 #include <spice/qxl_windows.h>
+#include <spice/qxl_dev.h>
 #include "desktop_layout.h"
 #include "vdlog.h"
 
@@ -85,6 +86,7 @@ void DesktopLayout::get_displays()
         _displays[display_id] = new DisplayMode(mode.dmPosition.x, mode.dmPosition.y,
                                                 mode.dmPelsWidth, mode.dmPelsHeight,
                                                 mode.dmBitsPerPel, attached);
+        update_monitor_config(dev_info.DeviceName, _displays[display_id]);
     }
     normalize_displays_pos();
     unlock();
@@ -142,8 +144,8 @@ void DesktopLayout::set_displays()
             vd_printf("display_id %lu out of range, #displays %zu" , display_id, _displays.size());
             break;
         }
-        if (!init_dev_mode(dev_info.DeviceName, &dev_mode, _displays.at(display_id),
-                           normal_x, normal_y, true)) {
+        DisplayMode * mode(_displays.at(display_id));
+        if (!init_dev_mode(dev_info.DeviceName, &dev_mode, mode, normal_x, normal_y, true)) {
             vd_printf("No suitable mode found for display %S", dev_info.DeviceName);
             break;
         }
@@ -152,6 +154,7 @@ void DesktopLayout::set_displays()
                                            CDS_UPDATEREGISTRY | CDS_NORESET, NULL);
         if (ret == DISP_CHANGE_SUCCESSFUL) {
             dev_sets++;
+            update_monitor_config(dev_info.DeviceName, mode);
         }
         if (!is_qxl) {
             display_id++;
@@ -355,3 +358,28 @@ bool DesktopLayout::init_dev_mode(LPCTSTR dev_name, DEVMODE* dev_mode, DisplayMo
     return true;
 }
 
+bool DesktopLayout::update_monitor_config(LPCTSTR dev_name, DisplayMode* mode)
+{
+    QXLHead monitor_config;
+
+    if (!mode || !mode->get_attached())
+        return false;
+
+    HDC hdc = CreateDC(dev_name, NULL, NULL, NULL);
+
+    memset(&monitor_config, 0, sizeof(monitor_config));
+    monitor_config.x = mode->_pos_x;
+    monitor_config.y = mode->_pos_y;
+    monitor_config.width = mode->_width;
+    monitor_config.height = mode->_height;
+
+    int err = ExtEscape(hdc, QXL_ESCAPE_MONITOR_CONFIG,
+        sizeof(QXLHead), (LPCSTR) &monitor_config, 0, NULL);
+
+    if (err < 0){
+        vd_printf("can't update monitor config, may have an older driver");
+    }
+
+    DeleteDC(hdc);
+    return (err >= 0);
+}
