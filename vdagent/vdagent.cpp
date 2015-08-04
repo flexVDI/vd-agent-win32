@@ -835,6 +835,10 @@ bool VDAgent::handle_announce_capabilities(VDAgentAnnounceCapabilities* announce
         _client_caps_size = caps_size;
     }
     memcpy(_client_caps, announce_capabilities->caps, sizeof(_client_caps[0]) * caps_size);
+
+    if (VD_AGENT_HAS_CAPABILITY(_client_caps, _client_caps_size,
+                                VD_AGENT_CAP_MONITORS_CONFIG_POSITION))
+        _desktop_layout->set_position_configurable(true);
     if (announce_capabilities->request) {
         return send_announce_capabilities(false);
     }

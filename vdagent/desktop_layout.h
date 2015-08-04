@@ -73,22 +73,23 @@ public:
     size_t get_display_count() { return _displays.size();}
     DWORD get_total_width() { return _total_width;}
     DWORD get_total_height() { return _total_height;}
-
+    void set_position_configurable(bool flag) { _send_monitors_position = flag; }
 private:
     void clean_displays();
     void normalize_displays_pos();
     DisplayMode * get_primary_display();
+    bool update_monitor_config(LPCTSTR dev_name, DisplayMode* mode);
     static bool consistent_displays();
     static bool is_attached(LPCTSTR dev_name);
     static bool get_qxl_device_id(WCHAR* device_key, DWORD* device_id);
     static bool init_dev_mode(LPCTSTR dev_name, DEVMODE* dev_mode, DisplayMode* mode,
                               LONG normal_x, LONG normal_y, bool set_pos);
-    static bool update_monitor_config(LPCTSTR dev_name, DisplayMode* mode);
 private:
     mutex_t _mutex;
     Displays _displays;
     DWORD _total_width;
     DWORD _total_height;
+    bool _send_monitors_position;
 };
 
 #endif

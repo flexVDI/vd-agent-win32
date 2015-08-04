@@ -35,6 +35,7 @@ void DisplayMode::set_res(DWORD width, DWORD height, DWORD depth)
 DesktopLayout::DesktopLayout()
     : _total_width (0)
     , _total_height (0)
+    , _send_monitors_position(false)
 {
     MUTEX_INIT(_mutex);
     get_displays();
@@ -364,6 +365,9 @@ bool DesktopLayout::update_monitor_config(LPCTSTR dev_name, DisplayMode* mode)
 
     if (!mode || !mode->get_attached())
         return false;
+
+    //Don't configure monitors unless the client supports it
+    if(!_send_monitors_position) return FALSE;
 
     HDC hdc = CreateDC(dev_name, NULL, NULL, NULL);
 
