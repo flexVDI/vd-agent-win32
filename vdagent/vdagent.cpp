@@ -567,13 +567,15 @@ bool VDAgent::handle_mouse_event(VDAgentMouseState* state)
     ZeroMemory(&_input, sizeof(INPUT));
     _input.type = INPUT_MOUSE;
     if (state->x != _mouse_x || state->y != _mouse_y) {
+        DWORD w = _desktop_layout->get_total_width();
+        DWORD h = _desktop_layout->get_total_height();
+        w = (w > 1) ? w-1 : 1; /* coordinates are 0..w-1, protect w==0 */
+        h = (h > 1) ? h-1 : 1; /* coordinates are 0..h-1, protect h==0 */
         _mouse_x = state->x;
         _mouse_y = state->y;
         mouse_move = MOUSEEVENTF_MOVE;
-        _input.mi.dx = (mode->get_pos_x() + _mouse_x) * 0xffff /
-                       _desktop_layout->get_total_width();
-        _input.mi.dy = (mode->get_pos_y() + _mouse_y) * 0xffff /
-                       _desktop_layout->get_total_height();
+        _input.mi.dx = (mode->get_pos_x() + _mouse_x) * 0xffff / w;
+        _input.mi.dy = (mode->get_pos_y() + _mouse_y) * 0xffff / h;
     }
     if (state->buttons != _buttons_state) {
         buttons_change = get_buttons_change(_buttons_state, state->buttons, VD_AGENT_LBUTTON_MASK,
