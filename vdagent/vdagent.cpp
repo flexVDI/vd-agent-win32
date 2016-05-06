@@ -146,6 +146,7 @@ private:
     uint32_t _in_msg_pos;
     bool _pending_input;
     bool _running;
+    bool _session_is_locked;
     bool _desktop_switch;
     DesktopLayout* _desktop_layout;
     bool _updating_display_config;
@@ -205,6 +206,7 @@ VDAgent::VDAgent()
     , _in_msg_pos (0)
     , _pending_input (false)
     , _running (false)
+    , _session_is_locked (false)
     , _desktop_switch (false)
     , _desktop_layout (NULL)
     , _display_setting (VD_AGENT_REGISTRY_KEY)
@@ -1284,7 +1286,19 @@ void VDAgent::dispatch_message(VDAgentMessage* msg, uint32_t port)
     case VD_AGENT_ANNOUNCE_CAPABILITIES:
         res = handle_announce_capabilities((VDAgentAnnounceCapabilities*)msg->data, msg->size);
         break;
-    case VD_AGENT_FILE_XFER_START:
+    case VD_AGENT_FILE_XFER_START: {
+        VDAgentFileXferStatusMessage status;
+        if (_session_is_locked) {
+            VDAgentFileXferStartMessage *s = (VDAgentFileXferStartMessage *)msg->data;
+            status.id = s->id;
+            status.result = VD_AGENT_FILE_XFER_STATUS_ERROR;
+            vd_printf("Fail to start file-xfer %u due: Locked session", status.id);
+            write_message(VD_AGENT_FILE_XFER_STATUS, sizeof(status), &status);
+        } else if (_file_xfer.dispatch(msg, &status)) {
+            write_message(VD_AGENT_FILE_XFER_STATUS, sizeof(status), &status);
+        }
+        break;
+    }
     case VD_AGENT_FILE_XFER_STATUS:
     case VD_AGENT_FILE_XFER_DATA: {
         VDAgentFileXferStatusMessage status;
@@ -1491,6 +1505,10 @@ LRESULT CALLBACK VDAgent::wnd_proc(HWND hwnd, UINT message, WPARAM wparam, LPARA
     case WM_WTSSESSION_CHANGE:
         if (wparam == WTS_SESSION_LOGON) {
             a->set_control_event(CONTROL_LOGON);
+        } else if (wparam == WTS_SESSION_LOCK) {
+            a->_session_is_locked = true;
+        } else if (wparam == WTS_SESSION_UNLOCK) {
+            a->_session_is_locked = false;
         }
         break;
     default:
