@@ -21,6 +21,7 @@
 #include <tlhelp32.h>
 #include "display_setting.h"
 #include "vdlog.h"
+#include "spice-protocol/spice/macros.h"
 
 enum DisplaySettingFlags {
     DISPLAY_SETTING_FLAGS_DISABLE_WALLPAPER = (1 << 0),
@@ -306,7 +307,7 @@ bool DisplaySetting::reload_wallpaper(HKEY desktop_reg_key)
         wallpaper_path[value_size] = '\0';
     }
 
-    if (SystemParametersInfo(SPI_GETDESKWALLPAPER, sizeof(cur_wallpaper), cur_wallpaper, 0)) {
+    if (SystemParametersInfo(SPI_GETDESKWALLPAPER, SPICE_N_ELEMENTS(cur_wallpaper), cur_wallpaper, 0)) {
         if (_tcscmp(cur_wallpaper, TEXT("")) != 0) {
             vd_printf("wallpaper wasn't disabled");
             return true;
