@@ -105,7 +105,7 @@ enum SystemVersion {
     SYS_VER_WIN_7_CLASS,  // also Windows 8, Server 2012, Server 2008/R2 & Vista
 };
 
-int supported_system_version();
+SystemVersion supported_system_version();
 
 #endif
 
