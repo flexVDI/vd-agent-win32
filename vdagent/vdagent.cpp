@@ -22,6 +22,7 @@
 #include "ximage.h"
 #undef max
 #undef min
+#include <spice/macros.h>
 #include <wtsapi32.h>
 #include <lmcons.h>
 #include <queue>
@@ -480,10 +481,22 @@ void VDAgent::input_desktop_message_loop()
 
 void VDAgent::event_dispatcher(DWORD timeout, DWORD wake_mask)
 {
-    HANDLE events[] = {_control_event, _stop_event};
-    DWORD event_count = _stop_event ? 2 : 1;
+    HANDLE events[2];
+    DWORD event_count = 1;
     DWORD wait_ret;
     MSG msg;
+    enum {
+        CONTROL_ACTION,
+        STOP_ACTION,
+    } actions[SPICE_N_ELEMENTS(events)], action;
+
+    events[0] = _control_event;
+    actions[0] = CONTROL_ACTION;
+    if (_stop_event) {
+        events[event_count] = _stop_event;
+        actions[event_count] = STOP_ACTION;
+        event_count++;
+    }
 
     wait_ret = MsgWaitForMultipleObjectsEx(event_count, events, timeout, wake_mask, MWMO_ALERTABLE);
     if (wait_ret == WAIT_OBJECT_0 + event_count) {
@@ -492,19 +505,25 @@ void VDAgent::event_dispatcher(DWORD timeout, DWORD wake_mask)
             DispatchMessage(&msg);
         }
         return;
+    } else if (wait_ret == WAIT_IO_COMPLETION || wait_ret == WAIT_TIMEOUT) {
+        return;
+    } else if (wait_ret < WAIT_OBJECT_0 || wait_ret > WAIT_OBJECT_0 + event_count) {
+        vd_printf("MsgWaitForMultipleObjectsEx failed: %lu %lu", wait_ret, GetLastError());
+        _running = false;
+        return;
     }
-    switch (wait_ret) {
-    case WAIT_OBJECT_0:
+
+    action = actions[wait_ret - WAIT_OBJECT_0];
+    switch (action) {
+    case CONTROL_ACTION:
         handle_control_event();
         break;
-    case WAIT_OBJECT_0 + 1:
+    case STOP_ACTION:
+        vd_printf("%s: received stop event", __func__);
         _running = false;
         break;
-    case WAIT_IO_COMPLETION:
-    case WAIT_TIMEOUT:
-        break;
     default:
-        vd_printf("MsgWaitForMultipleObjectsEx failed: %lu %lu", wait_ret, GetLastError());
+        vd_printf("%s: action not handled (%d)", __func__, action);
         _running = false;
     }
 }
@@ -905,8 +924,6 @@ bool VDAgent::handle_max_clipboard(VDAgentMaxClipboard *msg, uint32_t size)
     _max_clipboard = msg->max;
     return true;
 }
-
-#define MIN(a, b) ((a) > (b) ? (b) : (a))
 
 bool VDAgent::write_clipboard(VDAgentMessage* msg, uint32_t size)
 {
