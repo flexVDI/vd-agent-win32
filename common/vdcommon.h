@@ -62,8 +62,6 @@ typedef CRITICAL_SECTION mutex_t;
  * those functions are not required to be in that dll on the guest.
  */
 #ifdef OLDMSVCRT
-#define swprintf_s(buf, sz, format...) swprintf(buf, format)
-
 #ifndef _ftime_s
 #define _ftime_s(timeb) _ftime(timeb)
 #endif
@@ -72,6 +70,7 @@ typedef CRITICAL_SECTION mutex_t;
 #ifdef _MSC_VER // compiling with Visual Studio
 #define HAVE_STRCAT_S 1
 #define HAVE_STRCPY_S 1
+#define HAVE_SWPRINTF_S 1
 #endif
 
 #ifdef HAVE_STRCAT_S
@@ -88,6 +87,11 @@ errno_t vdagent_strcat_s(char *strDestination,
 errno_t vdagent_strcpy_s(char *strDestination,
                          size_t numberOfElements,
                          const char *strSource);
+#endif
+
+#ifndef HAVE_SWPRINTF_S
+int vdagent_swprintf_s(wchar_t *buf, size_t len, const wchar_t *format, ...);
+#define swprintf_s vdagent_swprintf_s
 #endif
 
 #ifdef _MSC_VER // compiling with Visual Studio

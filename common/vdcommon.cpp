@@ -15,6 +15,8 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include <stdarg.h>
+
 #include "vdcommon.h"
 
 int supported_system_version()
@@ -74,5 +76,19 @@ errno_t vdagent_strcpy_s(char *strDestination,
     strcpy(strDestination, strSource);
 
     return 0;
+}
+#endif
+
+#ifndef HAVE_SWPRINTF_S
+int vdagent_swprintf_s(wchar_t *buf, size_t len, const wchar_t *format, ...)
+{
+    va_list ap;
+    va_start(ap, format);
+    int res = _vsnwprintf(buf, len, format, ap);
+    va_end(ap);
+    if ((res < 0 || (unsigned) res >= len) && len > 0) {
+        buf[0] = 0;
+    }
+    return res;
 }
 #endif
