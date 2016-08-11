@@ -639,13 +639,12 @@ bool VDAgent::handle_mouse_event(VDAgentMouseState* state)
 
 bool VDAgent::handle_mon_config(VDAgentMonitorsConfig* mon_config, uint32_t port)
 {
-    VDAgent* a = _singleton;
     VDIChunk* reply_chunk;
     VDAgentMessage* reply_msg;
     VDAgentReply* reply;
     size_t display_count;
 
-    a->_updating_display_config = true;
+    _updating_display_config = true;
 
     display_count = _desktop_layout->get_display_count();
     for (uint32_t i = 0; i < display_count; i++) {
@@ -676,9 +675,9 @@ bool VDAgent::handle_mon_config(VDAgentMonitorsConfig* mon_config, uint32_t port
         _desktop_layout->set_displays();
     }
 
-    a->_updating_display_config = false;
+    _updating_display_config = false;
     /* refresh again, in case something else changed */
-    a->_desktop_layout->get_displays();
+    _desktop_layout->get_displays();
 
     DWORD msg_size = VD_MESSAGE_HEADER_SIZE + sizeof(VDAgentReply);
     reply_chunk = new_chunk(msg_size);
