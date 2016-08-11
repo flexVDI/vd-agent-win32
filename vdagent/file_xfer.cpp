@@ -159,7 +159,7 @@ void FileXfer::handle_status(VDAgentFileXferStatusMessage* status)
 
     vd_printf("id %u result %u", status->id, status->result); 
     if (status->result != VD_AGENT_FILE_XFER_STATUS_CANCELLED) {
-        vd_printf("only cancel is premitted");
+        vd_printf("only cancel is permitted");
         return;
     }
     iter = _tasks.find(status->id);
