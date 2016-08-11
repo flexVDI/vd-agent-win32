@@ -22,7 +22,7 @@
 
 class DisplaySettingOptions {
 public:
-    DisplaySettingOptions() 
+    DisplaySettingOptions()
         : _disable_wallpaper (false)
         , _disable_font_smoothing (false)
         , _disable_animation (false) {}

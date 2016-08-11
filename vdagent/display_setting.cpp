@@ -149,7 +149,7 @@ DWORD DisplaySetting::get_user_process_id()
                 vd_printf("ProcessIdToSessionId for explorer failed %lu", GetLastError());
                 break;
             }
-            
+
             if (explorer_session_id == agent_session_id) {
                 explorer_pid = proc_entry.th32ProcessID;
                 break;
@@ -397,7 +397,7 @@ bool DisplaySetting::disable_animation()
     win_animation.cbSize = sizeof(ANIMATIONINFO);
     win_animation.iMinAnimate = 0;
 
-    if (SystemParametersInfoA(SPI_SETANIMATION, sizeof(ANIMATIONINFO), 
+    if (SystemParametersInfoA(SPI_SETANIMATION, sizeof(ANIMATIONINFO),
                               &win_animation, 0)) {
         vd_printf("disable window animation: success");
     } else {
@@ -455,7 +455,7 @@ bool DisplaySetting::reload_win_animation(HKEY desktop_reg_key)
     active_win_animation.cbSize = sizeof(ANIMATIONINFO);
     active_win_animation.iMinAnimate = 1;
 
-    if (SystemParametersInfoA(SPI_SETANIMATION, sizeof(ANIMATIONINFO), 
+    if (SystemParametersInfoA(SPI_SETANIMATION, sizeof(ANIMATIONINFO),
                               &active_win_animation, 0)) {
         vd_printf("reload window animation: success");
         return false;
@@ -488,12 +488,12 @@ bool DisplaySetting::reload_ui_effects(HKEY desktop_reg_key)
         vd_printf("RegQueryValueEx(UserPreferencesMask) : fail %ld", status);
         return false;
     }
-    
+
     if (value_type != REG_BINARY) {
         vd_printf("bad UserPreferencesMask value type %lu (expected REG_BINARY)", value_type);
         return false;
     }
-    
+
     vd_printf("UserPreferencesMask = %lx %lx", ui_mask[0], ui_mask[1]);
 
     ret &= set_bool_system_parameter_info(SPI_SETUIEFFECTS, ui_mask[0] & 0x80000000);

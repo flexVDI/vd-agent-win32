@@ -127,7 +127,7 @@ bool FileXfer::handle_data(VDAgentFileXferDataMessage* data,
     if (task->pos > task->size) {
         vd_printf("file xfer is longer than expected");
         goto fin;
-    }  
+    }
     if (!WriteFile(task->handle, data->data, (DWORD)data->size,
                    &written, NULL) || written != data->size) {
         vd_printf("file write failed %lu", GetLastError());
@@ -157,7 +157,7 @@ void FileXfer::handle_status(VDAgentFileXferStatusMessage* status)
     FileXferTasks::iterator iter;
     FileXferTask* task;
 
-    vd_printf("id %u result %u", status->id, status->result); 
+    vd_printf("id %u result %u", status->id, status->result);
     if (status->result != VD_AGENT_FILE_XFER_STATUS_CANCELLED) {
         vd_printf("only cancel is permitted");
         return;
