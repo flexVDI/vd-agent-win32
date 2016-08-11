@@ -145,7 +145,7 @@ VDService::~VDService()
 {
     CloseHandle(_agent_stop_event);
     CloseHandle(_control_event);
-    delete _events;
+    delete[] _events;
     delete _log;
 }
 
