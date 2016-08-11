@@ -247,16 +247,17 @@ VDAgent::~VDAgent()
 
 DWORD WINAPI VDAgent::event_thread_proc(LPVOID param)
 {
+    VDAgent *agent = static_cast<VDAgent *>(param);
     HANDLE desktop_event = OpenEvent(SYNCHRONIZE, FALSE, L"WinSta0_DesktopSwitch");
     if (!desktop_event) {
         vd_printf("OpenEvent() failed: %lu", GetLastError());
         return 1;
     }
-    while (_singleton->_running) {
+    while (agent->_running) {
         DWORD wait_ret = WaitForSingleObject(desktop_event, INFINITE);
         switch (wait_ret) {
         case WAIT_OBJECT_0:
-            _singleton->set_control_event(CONTROL_DESKTOP_SWITCH);
+            agent->set_control_event(CONTROL_DESKTOP_SWITCH);
             break;
         case WAIT_TIMEOUT:
         default:
@@ -332,7 +333,7 @@ bool VDAgent::run()
         return false;
     }
     _running = true;
-    event_thread = CreateThread(NULL, 0, event_thread_proc, NULL, 0, &event_thread_id);
+    event_thread = CreateThread(NULL, 0, event_thread_proc, this, 0, &event_thread_id);
     if (!event_thread) {
         vd_printf("CreateThread() failed: %lu", GetLastError());
         cleanup();
