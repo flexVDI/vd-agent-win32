@@ -284,7 +284,7 @@ void VDService::handle_control_event()
 DWORD WINAPI VDService::control_handler(DWORD control, DWORD event_type, LPVOID event_data,
                                         LPVOID context)
 {
-    VDService* s = _singleton;
+    VDService* s = static_cast<VDService *>(context);
     DWORD ret = NO_ERROR;
 
     ASSERT(s);
@@ -352,7 +352,7 @@ VOID WINAPI VDService::main(DWORD argc, TCHAR* argv[])
     status->dwWaitHint = 0;
 #ifndef  DEBUG_VDSERVICE
     s->_status_handle = RegisterServiceCtrlHandlerEx(VD_SERVICE_NAME, &VDService::control_handler,
-                                                     NULL);
+                                                     s);
     if (!s->_status_handle) {
         vd_printf("RegisterServiceCtrlHandler failed\n");
         return;
