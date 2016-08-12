@@ -38,7 +38,6 @@ DesktopLayout::DesktopLayout()
     , _total_height (0)
     , _display_config (NULL)
 {
-    MUTEX_INIT(_mutex);
     _display_config = DisplayConfig::create_config();
     get_displays();
 }

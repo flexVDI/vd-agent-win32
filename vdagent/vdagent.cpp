@@ -235,8 +235,6 @@ VDAgent::VDAgent()
     ZeroMemory(&_read_overlapped, sizeof(_read_overlapped));
     ZeroMemory(&_write_overlapped, sizeof(_write_overlapped));
     ZeroMemory(_read_buf, sizeof(_read_buf));
-    MUTEX_INIT(_control_mutex);
-    MUTEX_INIT(_message_mutex);
 
     _singleton = this;
 }
@@ -366,17 +364,16 @@ void VDAgent::cleanup()
 
 void VDAgent::set_control_event(int control_command)
 {
-    MUTEX_LOCK(_control_mutex);
+    MutexLocker lock(_control_mutex);
     _control_queue.push(control_command);
     if (_control_event && !SetEvent(_control_event)) {
         vd_printf("SetEvent() failed: %lu", GetLastError());
     }
-    MUTEX_UNLOCK(_control_mutex);
 }
 
 void VDAgent::handle_control_event()
 {
-    MUTEX_LOCK(_control_mutex);
+    MutexLocker lock(_control_mutex);
     while (_control_queue.size()) {
         int control_command = _control_queue.front();
         _control_queue.pop();
@@ -406,7 +403,6 @@ void VDAgent::handle_control_event()
             vd_printf("Unsupported control command %u", control_command);
         }
     }
-    MUTEX_UNLOCK(_control_mutex);
 }
 
 void VDAgent::input_desktop_message_loop()
@@ -936,7 +932,7 @@ bool VDAgent::write_clipboard(VDAgentMessage* msg, uint32_t size)
 
     ASSERT(msg && size);
     //FIXME: do it smarter - no loop, no memcopy
-    MUTEX_LOCK(_message_mutex);
+    MutexLocker lock(_message_mutex);
     while (pos < size) {
         DWORD n = MIN(sizeof(VDIChunk) + size - pos, VD_AGENT_MAX_DATA_SIZE);
         VDIChunk* chunk = new_chunk(n);
@@ -950,7 +946,6 @@ bool VDAgent::write_clipboard(VDAgentMessage* msg, uint32_t size)
         enqueue_chunk(chunk);
         pos += (n - sizeof(VDIChunk));
     }
-    MUTEX_UNLOCK(_message_mutex);
     return ret;
 }
 
@@ -1438,7 +1433,7 @@ void VDAgent::write_completion(DWORD err, DWORD bytes, LPOVERLAPPED overlapped)
         a->_running = false;
         return;
     }
-    MUTEX_LOCK(a->_message_mutex);
+    MutexLocker lock(a->_message_mutex);
     a->_write_pos += bytes;
     chunk = a->_message_queue.front();
     count = sizeof(VDIChunk) + chunk->hdr.size - a->_write_pos;
@@ -1458,7 +1453,6 @@ void VDAgent::write_completion(DWORD err, DWORD bytes, LPOVERLAPPED overlapped)
             a->_running = false;
         }
     }
-    MUTEX_UNLOCK(a->_message_mutex);
 }
 
 VDIChunk* VDAgent::new_chunk(DWORD bytes)
@@ -1468,12 +1462,11 @@ VDIChunk* VDAgent::new_chunk(DWORD bytes)
 
 void VDAgent::enqueue_chunk(VDIChunk* chunk)
 {
-    MUTEX_LOCK(_message_mutex);
+    MutexLocker lock(_message_mutex);
     _message_queue.push(chunk);
     if (_message_queue.size() == 1) {
         write_completion(0, 0, &_write_overlapped);
     }
-    MUTEX_UNLOCK(_message_mutex);
 }
 
 LRESULT CALLBACK VDAgent::wnd_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)

@@ -124,8 +124,6 @@ VDService::VDService()
     _control_event = CreateEvent(NULL, FALSE, FALSE, NULL);
     _agent_stop_event = CreateEvent(NULL, FALSE, FALSE, VD_AGENT_STOP_EVENT);
     _agent_path[0] = wchar_t('\0');
-    MUTEX_INIT(_agent_mutex);
-    MUTEX_INIT(_control_mutex);
 }
 
 VDService::~VDService()
@@ -240,17 +238,16 @@ static const char* const session_events[] = {
 
 void VDService::set_control_event(int control_command)
 {
-    MUTEX_LOCK(_control_mutex);
+    MutexLocker lock(_control_mutex);
     _control_queue.push(control_command);
     if (_control_event && !SetEvent(_control_event)) {
         vd_printf("SetEvent() failed: %lu", GetLastError());
     }
-    MUTEX_UNLOCK(_control_mutex);
 }
 
 void VDService::handle_control_event()
 {
-    MUTEX_LOCK(_control_mutex);
+    MutexLocker lock(_control_mutex);
     while (_control_queue.size()) {
         int control_command = _control_queue.front();
         _control_queue.pop();
@@ -265,7 +262,6 @@ void VDService::handle_control_event()
             vd_printf("Unsupported control command %u", control_command);
         }
     }
-    MUTEX_UNLOCK(_control_mutex);
 }
 
 DWORD WINAPI VDService::control_handler(DWORD control, DWORD event_type, LPVOID event_data,
@@ -781,7 +777,7 @@ bool VDService::restart_agent(bool normal_restart)
     DWORD time = GetTickCount();
     bool ret = true;
 
-    MUTEX_LOCK(_agent_mutex);
+    MutexLocker lock(_agent_mutex);
     if (!normal_restart && ++_agent_restarts > VD_AGENT_MAX_RESTARTS) {
         vd_printf("Agent restarted too many times");
         ret = false;
@@ -794,7 +790,6 @@ bool VDService::restart_agent(bool normal_restart)
         _last_agent_restart_time = time;
         ret = true;
     }
-    MUTEX_UNLOCK(_agent_mutex);
     return ret;
 }
 

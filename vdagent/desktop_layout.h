@@ -68,8 +68,8 @@ public:
     ~DesktopLayout();
     void get_displays();
     void set_displays();
-    void lock() { MUTEX_LOCK(_mutex);}
-    void unlock() { MUTEX_UNLOCK(_mutex);}
+    void lock() { _mutex.lock(); }
+    void unlock() { _mutex.unlock(); }
     DisplayMode* get_display(int i) { return _displays.at(i);}
     size_t get_display_count() { return _displays.size();}
     DWORD get_total_width() { return _total_width;}

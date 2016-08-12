@@ -27,11 +27,42 @@
 #include "spice/vd_agent.h"
 #include "vdlog.h"
 
-typedef CRITICAL_SECTION mutex_t;
+class Mutex {
+public:
+    Mutex() {
+        InitializeCriticalSection(&_crit);
+    }
+    ~Mutex() {
+        DeleteCriticalSection(&_crit);
+    }
+    void lock() {
+        EnterCriticalSection(&_crit);
+    }
+    void unlock() {
+        LeaveCriticalSection(&_crit);
+    }
+private:
+    CRITICAL_SECTION _crit;
+    // no copy
+    Mutex(const Mutex&);
+    void operator=(const Mutex&);
+};
 
-#define MUTEX_INIT(mutex) InitializeCriticalSection(&mutex)
-#define MUTEX_LOCK(mutex) EnterCriticalSection(&mutex)
-#define MUTEX_UNLOCK(mutex) LeaveCriticalSection(&mutex)
+class MutexLocker {
+public:
+    MutexLocker(Mutex &mtx):_mtx(mtx) {
+        _mtx.lock();
+    }
+    ~MutexLocker() {
+        _mtx.unlock();
+    }
+private:
+    Mutex &_mtx;
+    // no copy
+    MutexLocker(const MutexLocker&);
+    void operator=(const MutexLocker&);
+};
+typedef Mutex mutex_t;
 
 #define VD_AGENT_REGISTRY_KEY "SOFTWARE\\Red Hat\\Spice\\vdagent\\"
 #define VD_AGENT_STOP_EVENT   TEXT("Global\\vdagent_stop_event")
