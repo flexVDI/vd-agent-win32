@@ -27,6 +27,7 @@
 #include <lmcons.h>
 #include <queue>
 #include <set>
+#include <vector>
 
 #define VD_AGENT_LOG_PATH       TEXT("%svdagent.log")
 #define VD_AGENT_WINCLASS_NAME  TEXT("VDAGENT")
@@ -125,6 +126,10 @@ private:
     bool send_announce_capabilities(bool request);
     void cleanup_in_msg();
     void cleanup();
+    bool has_capability(unsigned int capability) const {
+        return VD_AGENT_HAS_CAPABILITY(_client_caps.begin(), _client_caps.size(),
+                                       capability);
+    }
 
 private:
     static VDAgent* _singleton;
@@ -169,8 +174,7 @@ private:
     bool _logon_occured;
 
     int32_t _max_clipboard;
-    uint32_t *_client_caps;
-    uint32_t _client_caps_size;
+    std::vector<uint32_t> _client_caps;
 
     std::set<uint32_t> _grab_types;
 
@@ -217,8 +221,6 @@ VDAgent::VDAgent()
     , _logon_desktop (false)
     , _display_setting_initialized (false)
     , _max_clipboard (-1)
-    , _client_caps (NULL)
-    , _client_caps_size (0)
     , _log (NULL)
 {
     TCHAR log_path[MAX_PATH];
@@ -242,7 +244,6 @@ VDAgent::VDAgent()
 VDAgent::~VDAgent()
 {
     delete _log;
-    delete[] _client_caps;
 }
 
 DWORD WINAPI VDAgent::event_thread_proc(LPVOID param)
@@ -861,16 +862,9 @@ bool VDAgent::handle_announce_capabilities(VDAgentAnnounceCapabilities* announce
     for (uint32_t i = 0 ; i < caps_size; ++i) {
         vd_printf("%X", announce_capabilities->caps[i]);
     }
-    if (caps_size != _client_caps_size) {
-        delete[] _client_caps;
-        _client_caps = new uint32_t[caps_size];
-        ASSERT(_client_caps != NULL);
-        _client_caps_size = caps_size;
-    }
-    memcpy(_client_caps, announce_capabilities->caps, sizeof(_client_caps[0]) * caps_size);
+    _client_caps.assign(announce_capabilities->caps, announce_capabilities->caps + caps_size);
 
-    if (VD_AGENT_HAS_CAPABILITY(_client_caps, _client_caps_size,
-                                VD_AGENT_CAP_MONITORS_CONFIG_POSITION))
+    if (has_capability(VD_AGENT_CAP_MONITORS_CONFIG_POSITION))
         _desktop_layout->set_position_configurable(true);
     if (announce_capabilities->request) {
         return send_announce_capabilities(false);
@@ -988,8 +982,7 @@ void VDAgent::on_clipboard_grab()
     uint32_t types[clipboard_formats_count * VD_CLIPBOARD_FORMAT_MAX_TYPES];
     int count = 0;
 
-    if (!VD_AGENT_HAS_CAPABILITY(_client_caps, _client_caps_size,
-                                 VD_AGENT_CAP_CLIPBOARD_BY_DEMAND)) {
+    if (!has_capability(VD_AGENT_CAP_CLIPBOARD_BY_DEMAND)) {
         return;
     }
     if (CountClipboardFormats() == 0) {
@@ -1033,8 +1026,7 @@ void VDAgent::on_clipboard_request(UINT format)
         vd_printf("Unsupported clipboard format %u", format);
         return;
     }
-    if (!VD_AGENT_HAS_CAPABILITY(_client_caps, _client_caps_size,
-                                 VD_AGENT_CAP_CLIPBOARD_BY_DEMAND)) {
+    if (!has_capability(VD_AGENT_CAP_CLIPBOARD_BY_DEMAND)) {
         return;
     }
 
@@ -1060,8 +1052,7 @@ void VDAgent::on_clipboard_request(UINT format)
 
 void VDAgent::on_clipboard_release()
 {
-    if (!VD_AGENT_HAS_CAPABILITY(_client_caps, _client_caps_size,
-                                 VD_AGENT_CAP_CLIPBOARD_BY_DEMAND)) {
+    if (!has_capability(VD_AGENT_CAP_CLIPBOARD_BY_DEMAND)) {
         return;
     }
     if (_clipboard_owner == owner_guest) {
