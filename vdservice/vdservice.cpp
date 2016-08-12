@@ -233,7 +233,7 @@ bool VDService::uninstall()
     return ret;
 }
 
-const char* session_events[] = {
+static const char* const session_events[] = {
     "INVALID", "CONNECT", "DISCONNECT", "REMOTE_CONNECT", "REMOTE_DISCONNECT", "LOGON", "LOGOFF",
     "LOCK", "UNLOCK", "REMOTE_CONTROL"
 };
