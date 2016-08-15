@@ -279,7 +279,10 @@ bool DesktopLayout::init_dev_mode(LPCTSTR dev_name, DEVMODE* dev_mode, DisplayMo
     if (!mode || !mode->_attached) {
         //Detach monitor
         dev_mode->dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_POSITION;
-        return true;
+        dev_mode->dmPelsWidth = 0;
+        dev_mode->dmPelsHeight = 0;
+        ret = ChangeDisplaySettingsEx(dev_name, dev_mode, NULL, CDS_UPDATEREGISTRY, NULL);
+        return (ret == DISP_CHANGE_SUCCESSFUL);
     }
 
     hdc = CreateDC(dev_name, NULL, NULL, NULL);
