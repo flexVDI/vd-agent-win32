@@ -89,4 +89,40 @@ private:
     PATH_STATE _path_state;
 };
 
+class DisplayMode;
+
+//Class provides interface to get/set display configurations
+class DisplayConfig {
+public:
+    static DisplayConfig* create_config();
+    DisplayConfig();
+    virtual ~DisplayConfig() {};
+    virtual bool is_attached(DISPLAY_DEVICE* dev_info) = 0;
+    virtual bool custom_display_escape(LPCTSTR device, DEVMODE* mode) = 0;
+    virtual bool update_monitor_config(LPCTSTR device, DisplayMode* mode, DEVMODE* dev_mode) = 0;
+    virtual bool set_monitor_state(LPCTSTR device_name, DEVMODE* dev_mode, MONITOR_STATE state) = 0;
+    virtual LONG update_display_settings() = 0;
+    virtual bool update_dev_mode_position(LPCTSTR dev_name, DEVMODE* dev_mode, LONG x, LONG y) = 0;
+    void set_monitors_config(bool flag) { _send_monitors_config = flag; }
+    virtual void update_config_path() {};
+
+protected:
+    bool _send_monitors_config;
+};
+
+//DisplayConfig implementation for guest with XPDM graphics drivers
+class XPDMInterface : public DisplayConfig {
+public:
+    XPDMInterface() :DisplayConfig() {};
+    bool is_attached(DISPLAY_DEVICE* dev_info);
+    bool custom_display_escape(LPCTSTR device_name, DEVMODE* dev_mode);
+    bool update_monitor_config(LPCTSTR device_name, DisplayMode* mode, DEVMODE* dev_mode);
+    bool set_monitor_state(LPCTSTR device_name, DEVMODE* dev_mode, MONITOR_STATE state);
+    LONG update_display_settings();
+    bool update_dev_mode_position(LPCTSTR device_name, DEVMODE * dev_mode, LONG x, LONG y);
+
+private:
+    bool find_best_mode(LPCTSTR Device, DEVMODE* dev_mode);
+};
+
 #endif

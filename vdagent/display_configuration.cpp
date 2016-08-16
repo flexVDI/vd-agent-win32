@@ -153,6 +153,181 @@ struct DISPLAYCONFIG_PATH_INFO {
     UINT32 flags;
 };
 
+struct QXLMonitorEscape {
+    QXLMonitorEscape(DEVMODE* dev_mode)
+    {
+        ZeroMemory(&_head, sizeof(_head));
+        _head.x = dev_mode->dmPosition.x;
+        _head.y = dev_mode->dmPosition.y;
+        _head.width = dev_mode->dmPelsWidth;
+        _head.height = dev_mode->dmPelsHeight;
+    }
+    QXLHead _head;
+};
+
+struct QxlCustomEscapeObj : public QXLEscapeSetCustomDisplay {
+    QxlCustomEscapeObj(uint32_t bitsPerPel, uint32_t width, uint32_t height)
+    {
+        xres = width;
+        yres = height;
+        bpp = bitsPerPel;
+    }
+    QxlCustomEscapeObj() {};
+};
+
+DisplayConfig* DisplayConfig::create_config()
+{
+    DisplayConfig* new_interface;
+    new_interface = new XPDMInterface();
+    return new_interface;
+}
+
+DisplayConfig::DisplayConfig()
+    : _send_monitors_config(false)
+{}
+
+bool XPDMInterface::is_attached(DISPLAY_DEVICE* dev_info)
+{
+    return !!(dev_info->StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP);
+}
+
+bool XPDMInterface::set_monitor_state(LPCTSTR device_name, DEVMODE* dev_mode, MONITOR_STATE state)
+{
+    if (state == MONITOR_DETACHED) {
+        dev_mode->dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_POSITION;
+        dev_mode->dmPelsWidth = 0;
+        dev_mode->dmPelsHeight = 0;
+
+        LONG status = ChangeDisplaySettingsEx(device_name, dev_mode, NULL, CDS_UPDATEREGISTRY, NULL);
+        return (status == DISP_CHANGE_SUCCESSFUL);
+    }
+    return true;
+}
+
+LONG XPDMInterface::update_display_settings()
+{
+    return ChangeDisplaySettingsEx(NULL, NULL, NULL, 0, NULL);
+}
+
+bool XPDMInterface::update_dev_mode_position(LPCTSTR device_name,
+                                             DEVMODE* dev_mode, LONG x, LONG y)
+{
+    dev_mode->dmPosition.x = x;
+    dev_mode->dmPosition.y = y;
+    dev_mode->dmFields |= DM_POSITION;
+    vd_printf("%s: setting %S at (%lu, %lu)", __FUNCTION__, device_name, dev_mode->dmPosition.x,
+        dev_mode->dmPosition.y);
+
+    LONG status = ChangeDisplaySettingsEx(device_name, dev_mode, NULL,
+                                          CDS_UPDATEREGISTRY | CDS_NORESET, NULL);
+    return (status == DISP_CHANGE_SUCCESSFUL);
+}
+
+bool XPDMInterface::custom_display_escape(LPCTSTR device_name, DEVMODE* dev_mode)
+{
+    LONG        ret;
+    NTSTATUS    Status (ERROR_SUCCESS);
+    HDC         hdc = CreateDC(device_name, NULL, NULL, NULL);
+
+    if (!hdc) {
+        ret = ChangeDisplaySettingsEx(device_name, dev_mode, NULL, CDS_UPDATEREGISTRY, NULL);
+        if (ret == DISP_CHANGE_BADMODE) {
+            // custom resolution might not be set yet, use known resolution
+            // FIXME: this causes client temporary resize... a
+            // solution would involve passing custom resolution before
+            // driver initialization, perhaps through registry
+            dev_mode->dmPelsWidth = 640;
+            dev_mode->dmPelsHeight = 480;
+            ret = ChangeDisplaySettingsEx(device_name, dev_mode, NULL, CDS_UPDATEREGISTRY, NULL);
+        }
+
+        vd_printf("attach %ld", ret);
+        if (!(hdc = CreateDC(device_name, NULL, NULL, NULL))) {
+            vd_printf("%s: failed to create DC", __FUNCTION__);
+            return false;
+        }
+    }
+
+    QxlCustomEscapeObj custom_escape(dev_mode->dmBitsPerPel,
+                                            dev_mode->dmPelsWidth, dev_mode->dmPelsHeight);
+
+    int err = ExtEscape(hdc, QXL_ESCAPE_SET_CUSTOM_DISPLAY,
+              sizeof(QXLEscapeSetCustomDisplay), (LPCSTR) &custom_escape, 0, NULL);
+    if (err <= 0) {
+        vd_printf("%s: Can't set custom display, perhaps running with an older driver?",
+            __FUNCTION__);
+    }
+
+    if (!find_best_mode(device_name, dev_mode)) {
+        Status = E_FAIL;
+    }
+
+    DeleteDC(hdc);
+    return NT_SUCCESS(Status);
+}
+
+bool XPDMInterface::update_monitor_config(LPCTSTR device_name, DisplayMode* mode,
+                                           DEVMODE* dev_mode)
+{
+    if (!mode || !mode->get_attached()) {
+        return false;
+    }
+
+    QXLMonitorEscape monitor_config(dev_mode);
+    HDC hdc(CreateDC(device_name, NULL, NULL, NULL));
+    int err(0);
+
+    if (!hdc || !_send_monitors_config) {
+        return false;
+    }
+
+    err = ExtEscape(hdc, QXL_ESCAPE_MONITOR_CONFIG, sizeof(QXLHead),
+                    (LPCSTR) &monitor_config, 0, NULL);
+    if (err < 0) {
+        vd_printf("%s: %S can't update monitor config, may have old, old driver",
+                 __FUNCTION__, device_name);
+    }
+    DeleteDC(hdc);
+    return (err >= 0);
+}
+
+bool XPDMInterface::find_best_mode(LPCTSTR Device, DEVMODE* dev_mode)
+{
+    DWORD closest_diff = -1;
+    DWORD best = -1;
+
+    // force refresh mode table
+    DEVMODE test_dev_mode;
+    ZeroMemory(&test_dev_mode, sizeof(test_dev_mode));
+    test_dev_mode.dmSize = sizeof(DEVMODE);
+    EnumDisplaySettings(Device, 0xffffff, &test_dev_mode);
+
+    //Find the closest size which will fit within the monitor
+    for (DWORD i = 0; EnumDisplaySettings(Device, i, &test_dev_mode); i++) {
+        if (dev_mode->dmPelsWidth > test_dev_mode.dmPelsWidth ||
+            dev_mode->dmPelsHeight > test_dev_mode.dmPelsHeight ||
+            dev_mode->dmBitsPerPel != test_dev_mode.dmBitsPerPel) {
+            continue;
+        }
+        DWORD wdiff = dev_mode->dmPelsWidth - test_dev_mode.dmPelsWidth;
+        DWORD hdiff = dev_mode->dmPelsHeight - test_dev_mode.dmPelsHeight;
+        DWORD diff = wdiff * wdiff + hdiff * hdiff;
+        if (diff < closest_diff) {
+            closest_diff = diff;
+            best = i;
+        }
+    }
+    vd_printf("%s: closest_diff at %lu best %lu", __FUNCTION__, closest_diff, best);
+    if (best == (DWORD) -1 || !EnumDisplaySettings(Device, best, dev_mode)) {
+        return false;
+    }
+
+    //Change to the best fit
+    LONG status = ChangeDisplaySettingsEx(Device, dev_mode, NULL,
+                                          CDS_UPDATEREGISTRY | CDS_NORESET, NULL);
+    return NT_SUCCESS(status);
+}
+
 CCD::CCD()
     :_numPathElements(0)
     ,_numModeElements(0)
