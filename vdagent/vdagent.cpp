@@ -106,9 +106,9 @@ private:
     static VOID CALLBACK read_completion(DWORD err, DWORD bytes, LPOVERLAPPED overlapped);
     static VOID CALLBACK write_completion(DWORD err, DWORD bytes, LPOVERLAPPED overlapped);
     void dispatch_message(VDAgentMessage* msg, uint32_t port);
-    uint32_t get_clipboard_format(uint32_t type);
-    uint32_t get_clipboard_type(uint32_t format);
-    DWORD get_cximage_format(uint32_t type);
+    uint32_t get_clipboard_format(uint32_t type) const;
+    uint32_t get_clipboard_type(uint32_t format) const;
+    DWORD get_cximage_format(uint32_t type) const;
     enum { owner_none, owner_guest, owner_client };
     void set_clipboard_owner(int new_owner);
     enum { CONTROL_STOP, CONTROL_DESKTOP_SWITCH, CONTROL_LOGON, CONTROL_CLIPBOARD };
@@ -1218,7 +1218,7 @@ void VDAgent::handle_clipboard_release()
     set_clipboard_owner(owner_none);
 }
 
-uint32_t VDAgent::get_clipboard_format(uint32_t type)
+uint32_t VDAgent::get_clipboard_format(uint32_t type) const
 {
     for (unsigned int i = 0; i < clipboard_formats_count; i++) {
         for (const uint32_t* ptype = clipboard_formats[i].types; *ptype; ptype++) {
@@ -1230,7 +1230,7 @@ uint32_t VDAgent::get_clipboard_format(uint32_t type)
     return 0;
 }
 
-uint32_t VDAgent::get_clipboard_type(uint32_t format)
+uint32_t VDAgent::get_clipboard_type(uint32_t format) const
 {
     const uint32_t* types = NULL;
 
@@ -1250,7 +1250,7 @@ uint32_t VDAgent::get_clipboard_type(uint32_t format)
     return 0;
 }
 
-DWORD VDAgent::get_cximage_format(uint32_t type)
+DWORD VDAgent::get_cximage_format(uint32_t type) const
 {
     for (unsigned int i = 0; i < SPICE_N_ELEMENTS(image_types); i++) {
         if (image_types[i].type == type) {
