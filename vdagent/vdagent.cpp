@@ -46,7 +46,7 @@ typedef struct VDClipboardFormat {
     uint32_t types[VD_CLIPBOARD_FORMAT_MAX_TYPES];
 } VDClipboardFormat;
 
-VDClipboardFormat clipboard_formats[] = {
+static const VDClipboardFormat clipboard_formats[] = {
     {CF_UNICODETEXT, {VD_AGENT_CLIPBOARD_UTF8_TEXT, 0}},
     //FIXME: support more image types
     {CF_DIB, {VD_AGENT_CLIPBOARD_IMAGE_PNG, VD_AGENT_CLIPBOARD_IMAGE_BMP, 0}},
@@ -59,7 +59,7 @@ typedef struct ImageType {
     DWORD cximage_format;
 } ImageType;
 
-static ImageType image_types[] = {
+static const ImageType image_types[] = {
     {VD_AGENT_CLIPBOARD_IMAGE_PNG, CXIMAGE_FORMAT_PNG},
     {VD_AGENT_CLIPBOARD_IMAGE_BMP, CXIMAGE_FORMAT_BMP},
 };
@@ -997,7 +997,7 @@ void VDAgent::on_clipboard_grab()
     }
     for (unsigned int i = 0; i < clipboard_formats_count; i++) {
         if (IsClipboardFormatAvailable(clipboard_formats[i].format)) {
-            for (uint32_t* ptype = clipboard_formats[i].types; *ptype; ptype++) {
+            for (const uint32_t* ptype = clipboard_formats[i].types; *ptype; ptype++) {
                 types[count++] = *ptype;
             }
         }
@@ -1221,7 +1221,7 @@ void VDAgent::handle_clipboard_release()
 uint32_t VDAgent::get_clipboard_format(uint32_t type)
 {
     for (unsigned int i = 0; i < clipboard_formats_count; i++) {
-        for (uint32_t* ptype = clipboard_formats[i].types; *ptype; ptype++) {
+        for (const uint32_t* ptype = clipboard_formats[i].types; *ptype; ptype++) {
             if (*ptype == type) {
                 return clipboard_formats[i].format;
             }
@@ -1232,7 +1232,7 @@ uint32_t VDAgent::get_clipboard_format(uint32_t type)
 
 uint32_t VDAgent::get_clipboard_type(uint32_t format)
 {
-    uint32_t* types = NULL;
+    const uint32_t* types = NULL;
 
     for (unsigned int i = 0; i < clipboard_formats_count && !types; i++) {
         if (clipboard_formats[i].format == format) {
@@ -1242,7 +1242,7 @@ uint32_t VDAgent::get_clipboard_type(uint32_t format)
     if (!types) {
         return 0;
     }
-    for (uint32_t* ptype = types; *ptype; ptype++) {
+    for (const uint32_t* ptype = types; *ptype; ptype++) {
         if (_grab_types.find(*ptype) != _grab_types.end()) {
             return *ptype;
         }
