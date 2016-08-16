@@ -1,0 +1,509 @@
+/*
+Copyright (C) 2015-2016 Red Hat, Inc.
+
+This program is free software; you can redistribute it and/or
+modify it under the terms of the GNU General Public License as
+published by the Free Software Foundation; either version 2 of
+the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
+#include "display_configuration.h"
+#include <winternl.h>
+
+/* The following definitions and structures are taken
+from the wine project repository and can be found
+under: "wine/include/wingdi.h" */
+
+#define QDC_ALL_PATHS                          0x00000001
+
+#define SDC_USE_SUPPLIED_DISPLAY_CONFIG        0x00000020
+#define SDC_APPLY                              0x00000080
+#define SDC_SAVE_TO_DATABASE                   0x00000200
+#define SDC_FORCE_MODE_ENUMERATION             0x00001000
+
+#define DISPLAYCONFIG_PATH_ACTIVE              0x00000001
+#define DISPLAYCONFIG_PATH_MODE_IDX_INVALID    0xffffffff
+
+enum DISPLAYCONFIG_DEVICE_INFO_TYPE {
+    DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME = 1
+};
+
+enum DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY {};
+
+enum DISPLAYCONFIG_ROTATION {};
+
+enum DISPLAYCONFIG_SCANLINE_ORDERING {};
+
+enum DISPLAYCONFIG_SCALING {};
+
+enum DISPLAYCONFIG_PIXELFORMAT {};
+
+enum DISPLAYCONFIG_MODE_INFO_TYPE {};
+
+struct DISPLAYCONFIG_DEVICE_INFO_HEADER {
+    DISPLAYCONFIG_DEVICE_INFO_TYPE type;
+    UINT32                         size;
+    LUID                           adapterId;
+    UINT32                         id;
+};
+
+struct DISPLAYCONFIG_SOURCE_DEVICE_NAME {
+    DISPLAYCONFIG_DEVICE_INFO_HEADER          header;
+    WCHAR                                     viewGdiDeviceName[CCHDEVICENAME];
+};
+
+struct DISPLAYCONFIG_DESKTOP_IMAGE_INFO {
+    POINTL PathSourceSize;
+    RECTL DesktopImageRegion;
+    RECTL DesktopImageClip;
+};
+
+struct DISPLAYCONFIG_RATIONAL {
+    UINT32    Numerator;
+    UINT32    Denominator;
+};
+
+struct DISPLAYCONFIG_2DREGION {
+    UINT32 cx;
+    UINT32 cy;
+};
+
+struct DISPLAYCONFIG_VIDEO_SIGNAL_INFO {
+    UINT64 pixelRate;
+    DISPLAYCONFIG_RATIONAL hSyncFreq;
+    DISPLAYCONFIG_RATIONAL vSyncFreq;
+    DISPLAYCONFIG_2DREGION activeSize;
+    DISPLAYCONFIG_2DREGION totalSize;
+    union {
+        struct {
+            UINT32 videoStandard :16;
+            UINT32 vSyncFreqDivider :6;
+            UINT32 reserved :10;
+        } AdditionalSignalInfo;
+        UINT32 videoStandard;
+    } DUMMYUNIONNAME;
+    DISPLAYCONFIG_SCANLINE_ORDERING scanLineOrdering;
+};
+
+struct DISPLAYCONFIG_TARGET_MODE {
+    DISPLAYCONFIG_VIDEO_SIGNAL_INFO targetVideoSignalInfo;
+};
+
+struct DISPLAYCONFIG_SOURCE_MODE {
+    UINT32 width;
+    UINT32 height;
+    DISPLAYCONFIG_PIXELFORMAT pixelFormat;
+    POINTL position;
+};
+
+struct DISPLAYCONFIG_MODE_INFO {
+    DISPLAYCONFIG_MODE_INFO_TYPE infoType;
+    UINT32 id;
+    LUID adapterId;
+    union {
+        DISPLAYCONFIG_TARGET_MODE targetMode;
+        DISPLAYCONFIG_SOURCE_MODE sourceMode;
+        DISPLAYCONFIG_DESKTOP_IMAGE_INFO desktopImageInfo;
+    } DUMMYUNIONNAME;
+};
+
+struct DISPLAYCONFIG_PATH_SOURCE_INFO {
+    LUID adapterId;
+    UINT32 id;
+    union {
+        UINT32 modeInfoIdx;
+        struct {
+            UINT32 cloneGroupId :16;
+            UINT32 sourceModeInfoIdx :16;
+        } DUMMYSTRUCTNAME;
+    } DUMMYUNIONNAME;
+    UINT32 statusFlags;
+};
+
+struct DISPLAYCONFIG_PATH_TARGET_INFO {
+    LUID adapterId;
+    UINT32 id;
+    union {
+        UINT32 modeInfoIdx;
+        struct {
+            UINT32 desktopModeInfoIdx :16;
+            UINT32 targetModeInfoIdx :16;
+        } DUMMYSTRUCTNAME;
+    } DUMMYUNIONNAME;
+    DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY outputTechnology;
+    DISPLAYCONFIG_ROTATION rotation;
+    DISPLAYCONFIG_SCALING scaling;
+    DISPLAYCONFIG_RATIONAL refreshRate;
+    DISPLAYCONFIG_SCANLINE_ORDERING scanLineOrdering;
+    BOOL targetAvailable;
+    UINT32 statusFlags;
+};
+
+struct DISPLAYCONFIG_PATH_INFO {
+    DISPLAYCONFIG_PATH_SOURCE_INFO sourceInfo;
+    DISPLAYCONFIG_PATH_TARGET_INFO targetInfo;
+    UINT32 flags;
+};
+
+CCD::CCD()
+    :_numPathElements(0)
+    ,_numModeElements(0)
+    ,_pPathInfo(NULL)
+    ,_pModeInfo(NULL)
+    ,_pfnGetDeviceInfo(NULL)
+    ,_pfnGetDisplayConfigBufferSizes(NULL)
+    ,_pfnQueryDisplayConfig(NULL)
+    ,_pfnSetDisplayConfig(NULL)
+    ,_primary_detached(false)
+    ,_path_state(PATH_UPDATED)
+{
+    if (load_api()) {
+        get_config_buffers();
+    }
+    else {
+        throw std::exception();
+    }
+}
+
+CCD::~CCD()
+{
+    free_config_buffers();
+}
+
+bool CCD::query_display_config()
+{
+    LONG query_error(ERROR_SUCCESS);
+
+    //Until we get it or error != ERROR_INSUFFICIENT_BUFFER
+    do {
+        query_error = _pfnQueryDisplayConfig(QDC_ALL_PATHS, &_numPathElements, _pPathInfo,
+            &_numModeElements, _pModeInfo, NULL);
+
+        // if ERROR_INSUFFICIENT_BUFFER need to retry QueryDisplayConfig
+        // to get a new set of config buffers
+        //(see https://msdn.microsoft.com/en-us/library/windows/hardware/ff569215(v=vs.85).aspx )
+        if (query_error) {
+             if (query_error == ERROR_INSUFFICIENT_BUFFER) {
+                free_config_buffers();
+                if (!get_config_buffers())
+                    return false;
+            } else {
+                vd_printf("%s failed QueryDisplayConfig with 0x%lx", __FUNCTION__, query_error);
+                return false;
+            }
+        }
+    } while(query_error);
+    _path_state = PATH_CURRENT;
+    return true;
+}
+
+DISPLAYCONFIG_MODE_INFO* CCD::get_active_mode(LPCTSTR device_name, bool return_on_error)
+{
+    DISPLAYCONFIG_PATH_INFO* active_path;
+
+    active_path = get_device_path(device_name, true);
+
+    if (!active_path ) {
+        vd_printf("%s:%S failed", __FUNCTION__, device_name);
+        return NULL;
+    }
+    return &_pModeInfo[active_path->sourceInfo.modeInfoIdx];
+}
+
+bool CCD::set_display_config(LONG & error) {
+
+    debug_print_config("Before SetDisplayConfig");
+
+    if (_path_state == PATH_CURRENT) {
+        vd_printf("%s: path states says nothing changed", __FUNCTION__);
+        return true;
+    }
+
+    if (!(error = _pfnSetDisplayConfig(_numPathElements, _pPathInfo,
+            _numModeElements, _pModeInfo,
+            SDC_APPLY | SDC_USE_SUPPLIED_DISPLAY_CONFIG | SDC_FORCE_MODE_ENUMERATION | SDC_SAVE_TO_DATABASE))) {
+        return true;
+    }
+
+    vd_printf("%s failed SetDisplayConfig with 0x%lx", __FUNCTION__, error);
+    debug_print_config("After failed SetDisplayConfig");
+    return false;
+}
+
+DISPLAYCONFIG_PATH_INFO* CCD::get_device_path(LPCTSTR device_name, bool bActive)
+{
+    //Search for device's active path
+    for (UINT32 i = 0; i < _numPathElements; i++) {
+        DISPLAYCONFIG_PATH_INFO* path_info = &_pPathInfo[i];
+
+        //if bActive, return only paths that are currently active
+        if (bActive && !is_active_path(path_info))
+            continue;
+        if (!is_device_path(device_name, path_info))
+            continue;
+        return path_info;
+    }
+    return NULL;
+}
+
+void CCD::debug_print_config(const char* prefix)
+{
+    TCHAR dev_name[CCHDEVICENAME];
+    for (UINT32 i = 0; i < _numPathElements; i++) {
+        DISPLAYCONFIG_PATH_INFO* path_info = &_pPathInfo[i];
+        if (!(path_info->flags & DISPLAYCONFIG_PATH_ACTIVE))
+            continue;
+        get_device_name_config(path_info, dev_name);
+
+        if (path_info->sourceInfo.modeInfoIdx == DISPLAYCONFIG_PATH_MODE_IDX_INVALID) {
+            vd_printf("%s: %S  [%s] This path is active but has invalid mode set.", __FUNCTION__,
+                dev_name, prefix);
+            continue;
+        }
+        DISPLAYCONFIG_MODE_INFO* mode = &_pModeInfo[path_info->sourceInfo.modeInfoIdx];
+        vd_printf("%s: %S [%s] (%ld,%ld) (%ux%u).", __FUNCTION__, dev_name, prefix,
+            mode->sourceMode.position.x, mode->sourceMode.position.y,
+            mode->sourceMode.width, mode->sourceMode.height);
+    }
+}
+
+bool CCD::load_api()
+{
+    HMODULE hModule = GetModuleHandle(L"user32.dll");
+    if(!hModule) {
+        return false;
+    }
+
+    bool bFound_all(false);
+    do {
+        if (!(_pfnGetDeviceInfo = (PDISPLAYCONFIG_GETDEVICEINFO)
+            GetProcAddress(hModule, "DisplayConfigGetDeviceInfo"))) {
+            break;
+        }
+
+        if (!(_pfnGetDisplayConfigBufferSizes = (PGETDISPLAYCONFIG_BUFFERSIZES)
+            GetProcAddress(hModule, "GetDisplayConfigBufferSizes"))) {
+            break;
+        }
+
+        if (!(_pfnQueryDisplayConfig = (PQUERYDISPLAYCONFIG)
+            GetProcAddress(hModule, "QueryDisplayConfig"))) {
+            break;
+        }
+
+        if (!(_pfnSetDisplayConfig = (PSETDISPLAYCONFIG)
+            GetProcAddress(hModule, "SetDisplayConfig"))) {
+            break;
+        }
+        bFound_all = true;
+    }
+    while(0);
+
+    return bFound_all;
+}
+
+bool CCD::get_config_buffers()
+{
+    //Get Config Buffer Sizes
+    free_config_buffers();
+    LONG error(ERROR_SUCCESS);
+    error = _pfnGetDisplayConfigBufferSizes(QDC_ALL_PATHS, &_numPathElements,
+                                            &_numModeElements);
+    if (error) {
+        vd_printf("%s: GetDisplayConfigBufferSizes failed with 0x%lx", __FUNCTION__, error);
+        return false;
+    }
+
+    //Allocate arrays
+    _pPathInfo = new(std::nothrow) DISPLAYCONFIG_PATH_INFO[_numPathElements];
+    _pModeInfo = new(std::nothrow) DISPLAYCONFIG_MODE_INFO[_numModeElements];
+
+    if (!_pPathInfo || !_pModeInfo) {
+        vd_printf("%s OOM ", __FUNCTION__);
+        free_config_buffers();
+        return false;
+    }
+
+    ///clear the above arrays
+    ZeroMemory(_pPathInfo, sizeof(DISPLAYCONFIG_PATH_INFO) * _numPathElements);
+    ZeroMemory(_pModeInfo, sizeof(DISPLAYCONFIG_MODE_INFO) * _numModeElements);
+    return true;
+}
+
+void CCD::free_config_buffers()
+{
+    delete[] _pModeInfo;
+    _pModeInfo = NULL;
+    delete[] _pPathInfo;
+    _pPathInfo = NULL;
+    _numModeElements = _numPathElements = 0;
+}
+
+bool CCD::get_device_name_config(DISPLAYCONFIG_PATH_INFO* path, LPTSTR dev_name)
+{
+    LONG error(ERROR_SUCCESS);
+
+    DISPLAYCONFIG_SOURCE_DEVICE_NAME source_name;
+    source_name.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
+    source_name.header.size = sizeof(DISPLAYCONFIG_SOURCE_DEVICE_NAME);
+    source_name.header.adapterId = path->sourceInfo.adapterId;
+    source_name.header.id = path->sourceInfo.id;
+
+    error = _pfnGetDeviceInfo(&source_name.header);
+    if (error) {
+        vd_printf("%s DisplayConfigGetDeviceInfo failed with %lu", __FUNCTION__, error);
+        return false;
+    }
+    memcpy((void *)dev_name, source_name.viewGdiDeviceName, CCHDEVICENAME * sizeof(TCHAR));
+    return true;
+}
+
+bool CCD::is_device_path(LPCTSTR device_name, DISPLAYCONFIG_PATH_INFO* path)
+{
+    //Does this path belong to device_name?
+    TCHAR dev_name[CCHDEVICENAME];
+    if (!get_device_name_config(path, dev_name)) {
+        return false;
+    }
+    if (_tcscmp(dev_name, device_name)) {
+        return false;
+    }
+    return true;
+}
+
+// If we have detached the primary monitor, then we need to reset the positions of the remaining
+// monitors to insure that at least one is positioned at (0,0)
+// Windows specify that there must be such a monitor which is considered the primary one
+void CCD::verify_primary_position()
+{
+    LONG leftmost_x(LONG_MAX);
+    LONG leftmost_y(LONG_MAX);
+    if (!_primary_detached) {
+        return;
+    }
+    _primary_detached = false;
+
+    for (UINT32 i = 0; i < _numPathElements; i++) {
+        DISPLAYCONFIG_PATH_INFO* path_info = &_pPathInfo[i];
+        if (!is_active_path(path_info))
+            continue;
+
+        const POINTL& position(_pModeInfo[path_info->sourceInfo.modeInfoIdx].sourceMode.position);
+        // we already have a primary monitor so we have nothing to do
+        if (position.x == 0 && position.y == 0)
+            return;
+        if (leftmost_x > position.x) {
+            leftmost_x = position.x;
+            leftmost_y = position.y;
+        }
+        // in case there are more monitors on the left most, choose the top one
+        if (leftmost_x == position.x && leftmost_y > position.y)
+            leftmost_y = position.y;
+    }
+
+    // update all active monitors adjusting the choosen monitor to (0,0)
+    for (UINT32 i = 0; i < _numPathElements; i++) {
+        DISPLAYCONFIG_PATH_INFO* path_info = &_pPathInfo[i];
+        if (!is_active_path(path_info))
+            continue;
+        POINTL& position(_pModeInfo[path_info->sourceInfo.modeInfoIdx].sourceMode.position);
+        vd_printf("%s: setting mode x to %lu", __FUNCTION__, position.x);
+        position.x -= leftmost_x;
+        position.y -= leftmost_y;
+    }
+    _path_state = PATH_UPDATED;
+}
+
+bool CCD::update_mode_position(LPCTSTR device_name, DEVMODE* dev_mode)
+{
+    DISPLAYCONFIG_MODE_INFO* mode = get_active_mode(device_name, false);
+    if (!mode)
+        return false;
+
+    mode->sourceMode.position.x = dev_mode->dmPosition.x;
+    mode->sourceMode.position.y = dev_mode->dmPosition.y;
+    vd_printf("%s: %S updated path mode to (%lu, %lu) - (%u x%u)", __FUNCTION__,
+        device_name,
+        mode->sourceMode.position.x, mode->sourceMode.position.y,
+        mode->sourceMode.width, mode->sourceMode.height);
+    _path_state = PATH_UPDATED;
+    return true;
+
+}
+
+bool CCD::update_mode_size(LPCTSTR device_name, DEVMODE* dev_mode)
+{
+    DISPLAYCONFIG_MODE_INFO* mode = get_active_mode(device_name, false);
+    if (!mode) {
+        return false;
+    }
+
+    mode->sourceMode.width = dev_mode->dmPelsWidth;
+    mode->sourceMode.height = dev_mode->dmPelsHeight;
+    vd_printf("%s: %S updated path mode to (%lu, %lu - (%u x %u)", __FUNCTION__,
+        device_name,
+        mode->sourceMode.position.x, mode->sourceMode.position.y,
+        mode->sourceMode.width, mode->sourceMode.height);
+    _path_state = PATH_UPDATED;
+    return true;
+}
+
+void CCD::update_detached_primary_state(LPCTSTR device_name, DISPLAYCONFIG_PATH_INFO * path_info)
+{
+    DISPLAYCONFIG_MODE_INFO* mode(get_active_mode(device_name, false));
+
+    //will need to reset monitor positions if primary detached
+    path_info->flags = path_info->flags & ~DISPLAYCONFIG_PATH_ACTIVE;
+    if (!mode|| mode->sourceMode.position.x != 0 || mode->sourceMode.position.y != 0) {
+        return ;
+    }
+    _primary_detached = true;
+}
+
+bool CCD::set_path_state(LPCTSTR device_name, MONITOR_STATE new_state)
+{
+    DISPLAYCONFIG_PATH_INFO* path(get_device_path(device_name, false));
+    MONITOR_STATE current_path_state(MONITOR_DETACHED);
+    LONG error(0);
+
+    if (is_active_path(path)) {
+        current_path_state = MONITOR_ATTACHED;
+    }
+
+    //If state didn't change, nothing to do
+    if (current_path_state == new_state ) {
+        return true;
+    }
+
+    if (!path) {
+        return false;
+    }
+
+    _path_state = PATH_UPDATED;
+    if (new_state == MONITOR_DETACHED) {
+        update_detached_primary_state(device_name, path);
+    } else {
+        path->flags = path->flags | DISPLAYCONFIG_PATH_ACTIVE;
+        set_display_config(error);
+    }
+    return true;
+}
+
+bool CCD::is_attached(LPCTSTR device_name)
+{
+    return is_active_path(get_device_path(device_name, false));
+}
+
+bool CCD::is_active_path(DISPLAYCONFIG_PATH_INFO * path)
+{
+    return (path && (path->flags & DISPLAYCONFIG_PATH_ACTIVE) &&
+        (path->sourceInfo.modeInfoIdx != DISPLAYCONFIG_PATH_MODE_IDX_INVALID));
+}

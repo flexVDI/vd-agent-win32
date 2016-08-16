@@ -31,6 +31,8 @@ vdagent_SOURCES =			\
 	common/vdcommon.h		\
 	common/vdlog.cpp		\
 	common/vdlog.h			\
+	vdagent/display_configuration.cpp \
+	vdagent/display_configuration.h \
 	vdagent/desktop_layout.cpp	\
 	vdagent/desktop_layout.h	\
 	vdagent/display_setting.cpp	\
