@@ -52,7 +52,7 @@ VDClipboardFormat clipboard_formats[] = {
     {CF_DIB, {VD_AGENT_CLIPBOARD_IMAGE_PNG, VD_AGENT_CLIPBOARD_IMAGE_BMP, 0}},
 };
 
-#define clipboard_formats_count (sizeof(clipboard_formats) / sizeof(clipboard_formats[0]))
+#define clipboard_formats_count SPICE_N_ELEMENTS(clipboard_formats)
 
 typedef struct ImageType {
     uint32_t type;
@@ -1252,7 +1252,7 @@ uint32_t VDAgent::get_clipboard_type(uint32_t format)
 
 DWORD VDAgent::get_cximage_format(uint32_t type)
 {
-    for (unsigned int i = 0; i < sizeof(image_types) / sizeof(image_types[0]); i++) {
+    for (unsigned int i = 0; i < SPICE_N_ELEMENTS(image_types); i++) {
         if (image_types[i].type == type) {
             return image_types[i].cximage_format;
         }
