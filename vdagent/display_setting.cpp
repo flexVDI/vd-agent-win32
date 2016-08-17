@@ -19,9 +19,9 @@
 #include <sddl.h>
 #include <string.h>
 #include <tlhelp32.h>
+#include <spice/macros.h>
 #include "display_setting.h"
 #include "vdlog.h"
-#include "spice-protocol/spice/macros.h"
 
 enum DisplaySettingFlags {
     DISPLAY_SETTING_FLAGS_DISABLE_WALLPAPER = (1 << 0),
