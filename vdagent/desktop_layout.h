@@ -34,12 +34,12 @@ public:
         _primary = (pos_x == 0 && pos_y == 0 && attached);
     }
 
-    LONG get_pos_x() { return _pos_x;}
-    LONG get_pos_y() { return _pos_y;}
-    DWORD get_width() { return _width;}
-    DWORD get_height() { return _height;}
-    DWORD get_depth() { return _depth;}
-    bool get_attached() { return _attached;}
+    LONG get_pos_x() const { return _pos_x;}
+    LONG get_pos_y() const { return _pos_y;}
+    DWORD get_width() const { return _width;}
+    DWORD get_height() const { return _height;}
+    DWORD get_depth() const { return _depth;}
+    bool get_attached() const { return _attached;}
     void set_pos(LONG x, LONG y) { _pos_x = x; _pos_y = y;}
     void move_pos(LONG x, LONG y) { _pos_x += x; _pos_y += y;}
     void set_res(DWORD width, DWORD height, DWORD depth);
