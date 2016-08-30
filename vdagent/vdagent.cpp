@@ -644,6 +644,7 @@ bool VDAgent::handle_mon_config(VDAgentMonitorsConfig* mon_config, uint32_t port
     VDAgentMessage* reply_msg;
     VDAgentReply* reply;
     size_t display_count;
+    bool update_displays(false);
 
     _updating_display_config = true;
 
@@ -656,6 +657,7 @@ bool VDAgent::handle_mon_config(VDAgentMonitorsConfig* mon_config, uint32_t port
         if (i >= mon_config->num_of_monitors) {
             vd_printf("%d. detached", i);
             mode->set_attached(false);
+            update_displays = true;
             continue;
         }
         VDAgentMonConfig* mon = &mon_config->monitors[i];
@@ -663,16 +665,24 @@ bool VDAgent::handle_mon_config(VDAgentMonitorsConfig* mon_config, uint32_t port
                   mon->y, !!(mon_config->flags & VD_AGENT_CONFIG_MONITORS_FLAG_USE_POS));
         if (mon->height == 0 && mon->depth == 0) {
             vd_printf("%d. detaching", i);
+            update_displays = mode->get_attached() ? true : update_displays;
             mode->set_attached(false);
             continue;
         }
-        mode->set_res(mon->width, mon->height, mon->depth);
-        if (mon_config->flags & VD_AGENT_CONFIG_MONITORS_FLAG_USE_POS) {
-            mode->set_pos(mon->x, mon->y);
+        if (mode->get_height() != mon->height || mode->get_width() != mon->width || mode->get_depth() != mon->depth) {
+            mode->set_res(mon->width, mon->height, mon->depth);
+            update_displays = true;
         }
-        mode->set_attached(true);
+        if (mon_config->flags & VD_AGENT_CONFIG_MONITORS_FLAG_USE_POS && (mode->get_pos_x() != mon->x || mode->get_pos_y() != mon->y)) {
+            mode->set_pos(mon->x, mon->y);
+            update_displays = true;
+        }
+        if (!mode->get_attached()) {
+            mode->set_attached(true);
+            update_displays = true;
+        }
     }
-    if (display_count) {
+    if (update_displays) {
         _desktop_layout->set_displays();
     }
 
