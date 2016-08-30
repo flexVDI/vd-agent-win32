@@ -356,7 +356,8 @@ CCD::~CCD()
 bool CCD::query_display_config()
 {
     LONG query_error(ERROR_SUCCESS);
-
+    if (!get_config_buffers())
+        return false;
     //Until we get it or error != ERROR_INSUFFICIENT_BUFFER
     do {
         query_error = _pfnQueryDisplayConfig(QDC_ALL_PATHS, &_numPathElements, _pPathInfo,
@@ -367,7 +368,6 @@ bool CCD::query_display_config()
         //(see https://msdn.microsoft.com/en-us/library/windows/hardware/ff569215(v=vs.85).aspx )
         if (query_error) {
              if (query_error == ERROR_INSUFFICIENT_BUFFER) {
-                free_config_buffers();
                 if (!get_config_buffers())
                     return false;
             } else {
