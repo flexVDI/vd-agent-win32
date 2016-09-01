@@ -298,7 +298,7 @@ bool XPDMInterface::update_dev_mode_position(LPCTSTR device_name,
     dev_mode->dmPosition.x = x;
     dev_mode->dmPosition.y = y;
     dev_mode->dmFields |= DM_POSITION;
-    vd_printf("%s: setting %S at (%lu, %lu)", __FUNCTION__, device_name, dev_mode->dmPosition.x,
+    vd_printf("setting %S at (%lu, %lu)", device_name, dev_mode->dmPosition.x,
         dev_mode->dmPosition.y);
 
     LONG status = ChangeDisplaySettingsEx(device_name, dev_mode, NULL,
@@ -326,7 +326,7 @@ bool XPDMInterface::custom_display_escape(LPCTSTR device_name, DEVMODE* dev_mode
 
         vd_printf("attach %ld", ret);
         if (!(hdc = CreateDC(device_name, NULL, NULL, NULL))) {
-            vd_printf("%s: failed to create DC", __FUNCTION__);
+            vd_printf("failed to create DC");
             return false;
         }
     }
@@ -337,8 +337,7 @@ bool XPDMInterface::custom_display_escape(LPCTSTR device_name, DEVMODE* dev_mode
     int err = ExtEscape(hdc, QXL_ESCAPE_SET_CUSTOM_DISPLAY,
               sizeof(QXLEscapeSetCustomDisplay), (LPCSTR) &custom_escape, 0, NULL);
     if (err <= 0) {
-        vd_printf("%s: Can't set custom display, perhaps running with an older driver?",
-            __FUNCTION__);
+        vd_printf("Can't set custom display, perhaps running with an older driver?");
     }
 
     if (!find_best_mode(device_name, dev_mode)) {
@@ -367,8 +366,8 @@ bool XPDMInterface::update_monitor_config(LPCTSTR device_name, DisplayMode* mode
     err = ExtEscape(hdc, QXL_ESCAPE_MONITOR_CONFIG, sizeof(QXLHead),
                     (LPCSTR) &monitor_config, 0, NULL);
     if (err < 0) {
-        vd_printf("%s: %S can't update monitor config, may have old, old driver",
-                 __FUNCTION__, device_name);
+        vd_printf("%S can't update monitor config, may have old, old driver",
+                  device_name);
     }
     DeleteDC(hdc);
     return (err >= 0);
@@ -400,7 +399,7 @@ bool XPDMInterface::find_best_mode(LPCTSTR Device, DEVMODE* dev_mode)
             best = i;
         }
     }
-    vd_printf("%s: closest_diff at %lu best %lu", __FUNCTION__, closest_diff, best);
+    vd_printf("closest_diff at %lu best %lu", closest_diff, best);
     if (best == (DWORD) -1 || !EnumDisplaySettings(Device, best, dev_mode)) {
         return false;
     }
@@ -457,14 +456,14 @@ bool WDDMInterface::custom_display_escape(LPCTSTR device_name, DEVMODE* dev_mode
         return true;
     }
 
-    vd_printf("%s: updating %S resolution\n", __FUNCTION__, device_name);
+    vd_printf("updating %S resolution", device_name);
 
     WDDMCustomDisplayEscape wddm_escape(dev_mode);
     if (escape(device_name, &wddm_escape, sizeof(wddm_escape))) {
         return _ccd.update_mode_size(device_name, dev_mode);
     }
 
-    vd_printf("%s: (%dx%d)", __FUNCTION__, mode->sourceMode.width, mode->sourceMode.height);
+    vd_printf("(%dx%d)", mode->sourceMode.width, mode->sourceMode.height);
     return false;
 }
 
@@ -484,7 +483,7 @@ bool WDDMInterface::update_monitor_config(LPCTSTR device_name, DisplayMode* disp
         return _ccd.update_mode_position(device_name, dev_mode);
     }
 
-    vd_printf("%s: %S failed", __FUNCTION__, device_name);
+    vd_printf("%S failed", device_name);
     return false;
 
 }
@@ -518,7 +517,7 @@ bool WDDMInterface::init_d3d_api()
 
     //Look for the gdi32 functions we need to perform driver escapes
     if (!hModule) {
-        vd_printf("%s something wildly wrong as we can't open gdi32.dll", __FUNCTION__);
+        vd_printf("something wildly wrong as we can't open gdi32.dll");
         return false;
     }
 
@@ -580,7 +579,7 @@ D3D_HANDLE WDDMInterface::adapter_handle(LPCTSTR device_name)
     }
 
     if (!hAdapter) {
-        vd_printf("%s: failed to open adapter %S", __FUNCTION__, device_name);
+        vd_printf("failed to open adapter %S", device_name);
     }
 
     return hAdapter;
@@ -593,7 +592,7 @@ D3D_HANDLE WDDMInterface::handle_from_DC(LPCTSTR adapter_name)
     HDC hDc(CreateDC(adapter_name, NULL, NULL, NULL));
 
     if (!hDc) {
-        vd_printf("%s: %S CreateDC failed with %lu", __FUNCTION__, adapter_name, GetLastError());
+        vd_printf("%S CreateDC failed with %lu", adapter_name, GetLastError());
         return 0;
     }
 
@@ -601,7 +600,7 @@ D3D_HANDLE WDDMInterface::handle_from_DC(LPCTSTR adapter_name)
     open_data.hDc = hDc;
 
     if (!NT_SUCCESS(status = _pfnOpen_adapter_hdc(&open_data))) {
-        vd_printf("%s: %S open adapter from hdc failed with %lu", __FUNCTION__, adapter_name,
+        vd_printf("%S open adapter from hdc failed with %lu", adapter_name,
             status);
         open_data.hAdapter = 0;
     }
@@ -622,7 +621,7 @@ D3D_HANDLE WDDMInterface::handle_from_device_name(LPCTSTR adapter_name)
         return display_name_data.hAdapter;
     }
 
-    vd_printf("%s %S failed with 0x%lx", __FUNCTION__, adapter_name, status);
+    vd_printf("%S failed with 0x%lx", adapter_name, status);
     return 0;
 }
 
@@ -638,7 +637,7 @@ D3D_HANDLE WDDMInterface::handle_from_GDI_name(LPCTSTR adapter_name)
         return  gdi_display_name.hAdapter;
     }
 
-    vd_printf("%s: %S aurrrgghh nothing works..error  is 0x%lx", __FUNCTION__, adapter_name,
+    vd_printf("%S aurrrgghh nothing works..error  is 0x%lx", adapter_name,
             status);
     return 0;
 }
@@ -672,7 +671,7 @@ bool WDDMInterface::escape(LPCTSTR device_name, void* data, UINT size_data)
     status = _pfnEscape(&escapeData);
 
     if (!NT_SUCCESS(status)) {
-        vd_printf("%s: this should never happen. Status is 0x%lx", __FUNCTION__, status);
+        vd_printf("this should never happen. Status is 0x%lx", status);
     }
 
     //Close the handle to this device
@@ -723,7 +722,7 @@ bool CCD::query_display_config()
                 if (!get_config_buffers())
                     return false;
             } else {
-                vd_printf("%s failed QueryDisplayConfig with 0x%lx", __FUNCTION__, query_error);
+                vd_printf("failed QueryDisplayConfig with 0x%lx", query_error);
                 return false;
             }
         }
@@ -739,7 +738,7 @@ DISPLAYCONFIG_MODE_INFO* CCD::get_active_mode(LPCTSTR device_name, bool return_o
     active_path = get_device_path(device_name, true);
 
     if (!active_path ) {
-        vd_printf("%s:%S failed", __FUNCTION__, device_name);
+        vd_printf("%S failed", device_name);
         return NULL;
     }
     return &_pModeInfo[active_path->sourceInfo.modeInfoIdx];
@@ -750,7 +749,7 @@ bool CCD::set_display_config(LONG & error) {
     debug_print_config("Before SetDisplayConfig");
 
     if (_path_state == PATH_CURRENT) {
-        vd_printf("%s: path states says nothing changed", __FUNCTION__);
+        vd_printf("path states says nothing changed");
         return true;
     }
 
@@ -760,7 +759,7 @@ bool CCD::set_display_config(LONG & error) {
         return true;
     }
 
-    vd_printf("%s failed SetDisplayConfig with 0x%lx", __FUNCTION__, error);
+    vd_printf("failed SetDisplayConfig with 0x%lx", error);
     debug_print_config("After failed SetDisplayConfig");
     return false;
 }
@@ -791,12 +790,12 @@ void CCD::debug_print_config(const char* prefix)
         get_device_name_config(path_info, dev_name);
 
         if (path_info->sourceInfo.modeInfoIdx == DISPLAYCONFIG_PATH_MODE_IDX_INVALID) {
-            vd_printf("%s: %S  [%s] This path is active but has invalid mode set.", __FUNCTION__,
+            vd_printf("%S  [%s] This path is active but has invalid mode set.",
                 dev_name, prefix);
             continue;
         }
         DISPLAYCONFIG_MODE_INFO* mode = &_pModeInfo[path_info->sourceInfo.modeInfoIdx];
-        vd_printf("%s: %S [%s] (%ld,%ld) (%ux%u).", __FUNCTION__, dev_name, prefix,
+        vd_printf("%S [%s] (%ld,%ld) (%ux%u).", dev_name, prefix,
             mode->sourceMode.position.x, mode->sourceMode.position.y,
             mode->sourceMode.width, mode->sourceMode.height);
     }
@@ -845,7 +844,7 @@ bool CCD::get_config_buffers()
     error = _pfnGetDisplayConfigBufferSizes(QDC_ALL_PATHS, &_numPathElements,
                                             &_numModeElements);
     if (error) {
-        vd_printf("%s: GetDisplayConfigBufferSizes failed with 0x%lx", __FUNCTION__, error);
+        vd_printf("GetDisplayConfigBufferSizes failed with 0x%lx", error);
         return false;
     }
 
@@ -854,7 +853,7 @@ bool CCD::get_config_buffers()
     _pModeInfo = new(std::nothrow) DISPLAYCONFIG_MODE_INFO[_numModeElements];
 
     if (!_pPathInfo || !_pModeInfo) {
-        vd_printf("%s OOM ", __FUNCTION__);
+        vd_printf("OOM ");
         free_config_buffers();
         return false;
     }
@@ -886,7 +885,7 @@ bool CCD::get_device_name_config(DISPLAYCONFIG_PATH_INFO* path, LPTSTR dev_name)
 
     error = _pfnGetDeviceInfo(&source_name.header);
     if (error) {
-        vd_printf("%s DisplayConfigGetDeviceInfo failed with %lu", __FUNCTION__, error);
+        vd_printf("DisplayConfigGetDeviceInfo failed with %lu", error);
         return false;
     }
     memcpy((void *)dev_name, source_name.viewGdiDeviceName, CCHDEVICENAME * sizeof(TCHAR));
@@ -942,7 +941,7 @@ void CCD::verify_primary_position()
         if (!is_active_path(path_info))
             continue;
         POINTL& position(_pModeInfo[path_info->sourceInfo.modeInfoIdx].sourceMode.position);
-        vd_printf("%s: setting mode x to %lu", __FUNCTION__, position.x);
+        vd_printf("setting mode x to %lu", position.x);
         position.x -= leftmost_x;
         position.y -= leftmost_y;
     }
@@ -957,7 +956,7 @@ bool CCD::update_mode_position(LPCTSTR device_name, DEVMODE* dev_mode)
 
     mode->sourceMode.position.x = dev_mode->dmPosition.x;
     mode->sourceMode.position.y = dev_mode->dmPosition.y;
-    vd_printf("%s: %S updated path mode to (%lu, %lu) - (%u x%u)", __FUNCTION__,
+    vd_printf("%S updated path mode to (%lu, %lu) - (%u x%u)",
         device_name,
         mode->sourceMode.position.x, mode->sourceMode.position.y,
         mode->sourceMode.width, mode->sourceMode.height);
@@ -975,7 +974,7 @@ bool CCD::update_mode_size(LPCTSTR device_name, DEVMODE* dev_mode)
 
     mode->sourceMode.width = dev_mode->dmPelsWidth;
     mode->sourceMode.height = dev_mode->dmPelsHeight;
-    vd_printf("%s: %S updated path mode to (%lu, %lu - (%u x %u)", __FUNCTION__,
+    vd_printf("%S updated path mode to (%lu, %lu - (%u x %u)",
         device_name,
         mode->sourceMode.position.x, mode->sourceMode.position.y,
         mode->sourceMode.width, mode->sourceMode.height);
