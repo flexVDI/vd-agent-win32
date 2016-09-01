@@ -691,12 +691,8 @@ CCD::CCD()
     ,_primary_detached(false)
     ,_path_state(PATH_UPDATED)
 {
-    if (load_api()) {
-        get_config_buffers();
-    }
-    else {
-        throw std::exception();
-    }
+    load_api();
+    get_config_buffers();
 }
 
 CCD::~CCD()
@@ -801,14 +797,13 @@ void CCD::debug_print_config(const char* prefix)
     }
 }
 
-bool CCD::load_api()
+void CCD::load_api()
 {
     HMODULE hModule = GetModuleHandle(L"user32.dll");
-    if(!hModule) {
-        return false;
+    if (!hModule) {
+        throw std::exception();
     }
 
-    bool bFound_all(false);
     do {
         if (!(_pfnGetDeviceInfo = (PDISPLAYCONFIG_GETDEVICEINFO)
             GetProcAddress(hModule, "DisplayConfigGetDeviceInfo"))) {
@@ -829,11 +824,11 @@ bool CCD::load_api()
             GetProcAddress(hModule, "SetDisplayConfig"))) {
             break;
         }
-        bFound_all = true;
+        return;
     }
     while(0);
 
-    return bFound_all;
+    throw std::exception();
 }
 
 bool CCD::get_config_buffers()

@@ -67,7 +67,7 @@ public:
     void debug_print_config(const char* prefix = NULL);
 
 private:
-    bool load_api();
+    void load_api();
     bool get_config_buffers();
     void free_config_buffers();
     bool is_device_path(LPCTSTR device_name, DISPLAYCONFIG_PATH_INFO* path);
