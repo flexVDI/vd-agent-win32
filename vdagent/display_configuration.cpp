@@ -17,6 +17,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "display_configuration.h"
 #include <winternl.h>
+#include <spice/macros.h>
 
 /* The following definitions and structures are taken
 from the wine project repository and can be found
@@ -631,7 +632,7 @@ D3D_HANDLE WDDMInterface::handle_from_GDI_name(LPCTSTR adapter_name)
     NTSTATUS status;
 
     ZeroMemory(&gdi_display_name, sizeof(gdi_display_name));
-    wcsncpy(gdi_display_name.DeviceName, adapter_name, sizeof(TCHAR)* CCHDEVICENAME);
+    wcsncpy(gdi_display_name.DeviceName, adapter_name, SPICE_N_ELEMENTS(gdi_display_name.DeviceName));
 
     if (NT_SUCCESS(status = _pfnOpen_adapter_gdi_name(&gdi_display_name))) {
         return  gdi_display_name.hAdapter;
