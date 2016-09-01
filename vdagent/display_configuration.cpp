@@ -843,6 +843,10 @@ bool CCD::get_config_buffers()
     LONG error(ERROR_SUCCESS);
     error = _pfnGetDisplayConfigBufferSizes(QDC_ALL_PATHS, &_numPathElements,
                                             &_numModeElements);
+    if (error == ERROR_NOT_SUPPORTED) {
+        vd_printf("GetDisplayConfigBufferSizes failed, missing WDDM");
+        throw std::exception();
+    }
     if (error) {
         vd_printf("GetDisplayConfigBufferSizes failed with 0x%lx", error);
         return false;
