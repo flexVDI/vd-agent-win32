@@ -125,4 +125,51 @@ private:
     bool find_best_mode(LPCTSTR Device, DEVMODE* dev_mode);
 };
 
+//DisplayConfig implementation for guest with WDDM graphics drivers
+typedef UINT D3D_HANDLE;
+
+struct D3DKMT_ESCAPE;
+struct D3DKMT_OPENADAPTERFROMGDIDISPLAYNAME;
+struct D3DKMT_OPENADAPTERFROMDEVICENAME;
+struct D3DKMT_CLOSEADAPTER;
+struct D3DKMT_OPENADAPTERFROMHDC;
+
+typedef NTSTATUS(APIENTRY* PFND3DKMT_ESCAPE)(CONST D3DKMT_ESCAPE*);
+typedef NTSTATUS(APIENTRY* PFND3DKMT_OPENADAPTERFROMGDIDISPLAYNAME)(D3DKMT_OPENADAPTERFROMGDIDISPLAYNAME*);
+typedef NTSTATUS(APIENTRY* PFND3DKMT_OPENADAPTERFROMDEVICENAME)(D3DKMT_OPENADAPTERFROMDEVICENAME*);
+typedef NTSTATUS(APIENTRY* PFND3DKMT_CLOSEADAPTER)(D3DKMT_CLOSEADAPTER*);
+typedef NTSTATUS(APIENTRY* PFND3DKMT_OPENADAPTERFROMHDC)(D3DKMT_OPENADAPTERFROMHDC*);
+
+class WDDMInterface : public DisplayConfig {
+public:
+    WDDMInterface();
+    bool is_attached(DISPLAY_DEVICE* dev_info);
+    bool set_monitor_state(LPCTSTR device_name, DEVMODE* dev_mode, MONITOR_STATE state);
+    LONG update_display_settings();
+    bool custom_display_escape(LPCTSTR device_name, DEVMODE* dev_mode);
+    bool update_monitor_config(LPCTSTR device_name, DisplayMode* mode, DEVMODE* dev_mode);
+    bool update_dev_mode_position(LPCTSTR device_name, DEVMODE * dev_mode, LONG x, LONG y);
+    void update_config_path();
+
+private:
+    bool init_d3d_api();
+    D3D_HANDLE adapter_handle(LPCTSTR device_name);
+    D3D_HANDLE handle_from_DC(LPCTSTR adapter_name);
+    D3D_HANDLE handle_from_device_name(LPCTSTR adapter_name);
+    D3D_HANDLE handle_from_GDI_name(LPCTSTR adapter_name);
+
+    void close_adapter(D3D_HANDLE handle);
+    bool escape(LPCTSTR device_name, void* data, UINT sizeData);
+
+    //GDI Function pointers
+    PFND3DKMT_OPENADAPTERFROMHDC _pfnOpen_adapter_hdc;
+    PFND3DKMT_CLOSEADAPTER  _pfnClose_adapter;
+    PFND3DKMT_ESCAPE _pfnEscape;
+    PFND3DKMT_OPENADAPTERFROMDEVICENAME _pfnOpen_adapter_device_name;
+    PFND3DKMT_OPENADAPTERFROMGDIDISPLAYNAME _pfnOpen_adapter_gdi_name;
+
+    //object handles the CCD API
+    CCD _ccd;
+};
+
 #endif

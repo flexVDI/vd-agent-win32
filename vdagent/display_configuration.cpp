@@ -153,6 +153,56 @@ struct DISPLAYCONFIG_PATH_INFO {
     UINT32 flags;
 };
 
+/* The following definitions and structures are taken
+ * from here https://github.com/notr1ch/DWMCapture/blob/master/DWMCaptureSource.cpp */
+
+enum D3DKMT_ESCAPETYPE {
+    D3DKMT_ESCAPE_DRIVERPRIVATE = 0
+};
+
+struct D3DDDI_ESCAPEFLAGS {
+    union {
+        struct {
+            UINT    Reserved : 31;
+        };
+        UINT        Value;
+    };
+};
+
+struct D3DKMT_ESCAPE {
+    D3D_HANDLE hAdapter;
+    D3D_HANDLE hDevice;
+    D3DKMT_ESCAPETYPE Type;
+    D3DDDI_ESCAPEFLAGS Flags;
+    VOID* pPrivateDriverData;
+    UINT PrivateDriverDataSize;
+    D3D_HANDLE hContext;
+};
+
+struct D3DKMT_OPENADAPTERFROMHDC {
+    HDC hDc;
+    D3D_HANDLE hAdapter;
+    LUID AdapterLuid;
+    UINT VidPnSourceId;
+};
+
+struct D3DKMT_CLOSEADAPTER {
+    D3D_HANDLE hAdapter;
+};
+
+struct D3DKMT_OPENADAPTERFROMDEVICENAME {
+    const WCHAR *pDeviceName;
+    D3D_HANDLE hAdapter;
+    LUID AdapterLuid;
+};
+
+struct D3DKMT_OPENADAPTERFROMGDIDISPLAYNAME {
+    WCHAR DeviceName[32];
+    D3D_HANDLE hAdapter;
+    LUID AdapterLuid;
+    UINT VidPnSourceId;
+};
+
 struct QXLMonitorEscape {
     QXLMonitorEscape(DEVMODE* dev_mode)
     {
@@ -172,13 +222,45 @@ struct QxlCustomEscapeObj : public QXLEscapeSetCustomDisplay {
         yres = height;
         bpp = bitsPerPel;
     }
-    QxlCustomEscapeObj() {};
+};
+
+struct WDDMCustomDisplayEscape {
+    WDDMCustomDisplayEscape(DEVMODE* dev_mode)
+    {
+        _ioctl = QXL_ESCAPE_SET_CUSTOM_DISPLAY;
+        _custom.bpp = dev_mode->dmBitsPerPel;
+        _custom.xres = dev_mode->dmPelsWidth;
+        _custom.yres = dev_mode->dmPelsHeight;
+    }
+    uint32_t                    _ioctl;
+    QXLEscapeSetCustomDisplay   _custom;
+};
+
+struct WDDMMonitorConfigEscape {
+    WDDMMonitorConfigEscape(DisplayMode* mode)
+    {
+        _ioctl = QXL_ESCAPE_MONITOR_CONFIG;
+        _head.id = _head.surface_id = 0;
+        _head.x = mode->get_pos_x();
+        _head.y = mode->get_pos_y();
+        _head.width = mode->get_width();
+        _head.height = mode->get_height();
+    }
+    uint32_t    _ioctl;
+    QXLHead     _head;
 };
 
 DisplayConfig* DisplayConfig::create_config()
 {
     DisplayConfig* new_interface;
-    new_interface = new XPDMInterface();
+    /* Try to open a WDDM adapter.
+    If that failed, assume we have an XPDM driver */
+    try {
+        new_interface = new  WDDMInterface();
+    }
+    catch (std::exception& e) {
+        new_interface = new XPDMInterface();
+    }
     return new_interface;
 }
 
@@ -325,6 +407,275 @@ bool XPDMInterface::find_best_mode(LPCTSTR Device, DEVMODE* dev_mode)
     //Change to the best fit
     LONG status = ChangeDisplaySettingsEx(Device, dev_mode, NULL,
                                           CDS_UPDATEREGISTRY | CDS_NORESET, NULL);
+    return NT_SUCCESS(status);
+}
+
+WDDMInterface::WDDMInterface()
+    : _pfnOpen_adapter_hdc(NULL)
+    , _pfnClose_adapter(NULL)
+    , _pfnEscape(NULL)
+    , _pfnOpen_adapter_device_name(NULL)
+    , _pfnOpen_adapter_gdi_name(NULL)
+{
+    LONG error(0);
+    //Can we find the D3D calls we need?
+    if (!init_d3d_api()) {
+        throw std::exception();
+    }
+
+    //Initialize  CCD path stuff
+    if (!_ccd.query_display_config()) {
+        throw std::exception();
+    }
+
+    if (!_ccd.set_display_config(error)) {
+        throw std::exception();
+    }
+}
+
+bool WDDMInterface::is_attached(DISPLAY_DEVICE* dev_info)
+{
+    return _ccd.is_attached(dev_info->DeviceName);
+}
+
+bool WDDMInterface::set_monitor_state(LPCTSTR device_name, DEVMODE* dev_mode, MONITOR_STATE state)
+{
+   return  _ccd.set_path_state(device_name, state);
+}
+
+bool WDDMInterface::custom_display_escape(LPCTSTR device_name, DEVMODE* dev_mode)
+{
+    DISPLAYCONFIG_MODE_INFO* mode = _ccd.get_active_mode(device_name, false);
+    if (!mode) {
+        return false;
+    }
+
+    //Don't bother if we are already set to the new resolution
+    if (mode->sourceMode.width == dev_mode->dmPelsWidth &&
+        mode->sourceMode.height == dev_mode->dmPelsHeight) {
+        return true;
+    }
+
+    vd_printf("%s: updating %S resolution\n", __FUNCTION__, device_name);
+
+    WDDMCustomDisplayEscape wddm_escape(dev_mode);
+    if (escape(device_name, &wddm_escape, sizeof(wddm_escape))) {
+        return _ccd.update_mode_size(device_name, dev_mode);
+    }
+
+    vd_printf("%s: (%dx%d)", __FUNCTION__, mode->sourceMode.width, mode->sourceMode.height);
+    return false;
+}
+
+bool WDDMInterface::update_monitor_config(LPCTSTR device_name, DisplayMode* display_mode,
+                                           DEVMODE* dev_mode)
+{
+    if (!display_mode || !display_mode->get_attached()) {
+        return false;
+    }
+    DISPLAYCONFIG_MODE_INFO* mode = _ccd.get_active_mode(device_name, false);
+    if (!mode || !_send_monitors_config)
+        return false;
+
+    WDDMMonitorConfigEscape wddm_escape(display_mode);
+    if (escape(device_name, &wddm_escape, sizeof(wddm_escape))) {
+        //Update the path position
+        return _ccd.update_mode_position(device_name, dev_mode);
+    }
+
+    vd_printf("%s: %S failed", __FUNCTION__, device_name);
+    return false;
+
+}
+
+LONG WDDMInterface::update_display_settings()
+{
+    LONG error(0);
+    //If we removed the primary monitor since the last call, we need to
+    //reorder the other monitors, making the leftmost one the primary
+    _ccd.verify_primary_position();
+    _ccd.set_display_config(error);
+    return error;
+}
+
+void WDDMInterface::update_config_path()
+{
+    _ccd.query_display_config();
+}
+
+bool WDDMInterface::update_dev_mode_position(LPCTSTR device_name, DEVMODE* dev_mode,
+                                             LONG x, LONG y)
+{
+    dev_mode->dmPosition.x = x;
+    dev_mode->dmPosition.y = y;
+    return _ccd.update_mode_position(device_name, dev_mode);
+}
+
+bool WDDMInterface::init_d3d_api()
+{
+    HMODULE hModule = GetModuleHandle(L"gdi32.dll");
+
+    //Look for the gdi32 functions we need to perform driver escapes
+    if (!hModule) {
+        vd_printf("%s something wildly wrong as we can't open gdi32.dll", __FUNCTION__);
+        return false;
+    }
+
+    do {
+        _pfnClose_adapter = (PFND3DKMT_CLOSEADAPTER)
+            GetProcAddress(hModule, "D3DKMTCloseAdapter");
+        if (!_pfnClose_adapter) {
+            break;
+        }
+
+        _pfnEscape = (PFND3DKMT_ESCAPE) GetProcAddress(hModule, "D3DKMTEscape");
+        if (!_pfnEscape) {
+            break;
+        }
+
+        _pfnOpen_adapter_hdc = (PFND3DKMT_OPENADAPTERFROMHDC)
+            GetProcAddress(hModule, "D3DKMTOpenAdapterFromHdc");
+        if (!_pfnOpen_adapter_hdc) {
+            break;
+        }
+
+        _pfnOpen_adapter_device_name = (PFND3DKMT_OPENADAPTERFROMDEVICENAME)
+            GetProcAddress(hModule, "D3DKMTOpenAdapterFromDeviceName");
+        if (!_pfnOpen_adapter_device_name) {
+            break;
+        }
+
+        _pfnOpen_adapter_gdi_name = (PFND3DKMT_OPENADAPTERFROMGDIDISPLAYNAME)
+            GetProcAddress(hModule, "D3DKMTOpenAdapterFromGdiDisplayName");
+        if (!_pfnOpen_adapter_gdi_name) {
+            break;
+        }
+
+    }
+    while(0);
+
+    //Did we get them ?
+    if (!_pfnClose_adapter || !_pfnOpen_adapter_hdc || !_pfnEscape)  {
+        return false;
+    }
+    return true;
+}
+
+D3D_HANDLE WDDMInterface::adapter_handle(LPCTSTR device_name)
+{
+    D3D_HANDLE hAdapter(0);
+
+    //For some reason, this call will occasionally fail.
+    if ((hAdapter = handle_from_DC(device_name))) {
+        return hAdapter;
+    }
+        //So try other available methods.
+    if (_pfnOpen_adapter_device_name && (hAdapter = handle_from_device_name(device_name))) {
+        return hAdapter;
+    }
+    //One last chance to open this guy
+    if (_pfnOpen_adapter_gdi_name) {
+        hAdapter = handle_from_GDI_name(device_name);
+    }
+
+    if (!hAdapter) {
+        vd_printf("%s: failed to open adapter %S", __FUNCTION__, device_name);
+    }
+
+    return hAdapter;
+}
+
+D3D_HANDLE WDDMInterface::handle_from_DC(LPCTSTR adapter_name)
+{
+    NTSTATUS status;
+    D3DKMT_OPENADAPTERFROMHDC open_data;
+    HDC hDc(CreateDC(adapter_name, NULL, NULL, NULL));
+
+    if (!hDc) {
+        vd_printf("%s: %S CreateDC failed with %lu", __FUNCTION__, adapter_name, GetLastError());
+        return 0;
+    }
+
+    ZeroMemory(&open_data, sizeof(D3DKMT_OPENADAPTERFROMHDC));
+    open_data.hDc = hDc;
+
+    if (!NT_SUCCESS(status = _pfnOpen_adapter_hdc(&open_data))) {
+        vd_printf("%s: %S open adapter from hdc failed with %lu", __FUNCTION__, adapter_name,
+            status);
+        open_data.hAdapter = 0;
+    }
+
+    DeleteDC(hDc);
+    return open_data.hAdapter;
+}
+
+D3D_HANDLE WDDMInterface::handle_from_device_name(LPCTSTR adapter_name)
+{
+    D3DKMT_OPENADAPTERFROMDEVICENAME display_name_data;
+    NTSTATUS  status;
+
+    ZeroMemory(&display_name_data, sizeof(display_name_data));
+    display_name_data.pDeviceName = adapter_name;
+
+    if (NT_SUCCESS(status = _pfnOpen_adapter_device_name(&display_name_data))) {
+        return display_name_data.hAdapter;
+    }
+
+    vd_printf("%s %S failed with 0x%lx", __FUNCTION__, adapter_name, status);
+    return 0;
+}
+
+D3D_HANDLE WDDMInterface::handle_from_GDI_name(LPCTSTR adapter_name)
+{
+    D3DKMT_OPENADAPTERFROMGDIDISPLAYNAME gdi_display_name;
+    NTSTATUS status;
+
+    ZeroMemory(&gdi_display_name, sizeof(gdi_display_name));
+    wcsncpy(gdi_display_name.DeviceName, adapter_name, sizeof(TCHAR)* CCHDEVICENAME);
+
+    if (NT_SUCCESS(status = _pfnOpen_adapter_gdi_name(&gdi_display_name))) {
+        return  gdi_display_name.hAdapter;
+    }
+
+    vd_printf("%s: %S aurrrgghh nothing works..error  is 0x%lx", __FUNCTION__, adapter_name,
+            status);
+    return 0;
+}
+
+void WDDMInterface::close_adapter(D3D_HANDLE handle)
+{
+    D3DKMT_CLOSEADAPTER closeData;
+    if (handle) {
+        closeData.hAdapter = handle;
+        _pfnClose_adapter(&closeData);
+    }
+}
+
+bool WDDMInterface::escape(LPCTSTR device_name, void* data, UINT size_data)
+{
+    D3DKMT_ESCAPE   escapeData;
+    NTSTATUS        status;
+    D3D_HANDLE   hAdapter(0);
+
+    if (!(hAdapter = adapter_handle(device_name)))
+        return false;
+
+    escapeData.hAdapter = hAdapter;
+    escapeData.hDevice = 0;
+    escapeData.hContext = 0;
+    escapeData.Type = D3DKMT_ESCAPE_DRIVERPRIVATE;
+    escapeData.Flags.Value = 0;
+    escapeData.pPrivateDriverData = data;
+    escapeData.PrivateDriverDataSize = size_data;
+
+    status = _pfnEscape(&escapeData);
+
+    if (!NT_SUCCESS(status)) {
+        vd_printf("%s: this should never happen. Status is 0x%lx", __FUNCTION__, status);
+    }
+
+    //Close the handle to this device
+    close_adapter(hAdapter);
     return NT_SUCCESS(status);
 }
 
