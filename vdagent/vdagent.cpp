@@ -19,7 +19,7 @@
 #include "desktop_layout.h"
 #include "display_setting.h"
 #include "file_xfer.h"
-#include "ximage.h"
+#include "image.h"
 #undef max
 #undef min
 #include <spice/macros.h>
@@ -54,16 +54,6 @@ static const VDClipboardFormat clipboard_formats[] = {
 };
 
 #define clipboard_formats_count SPICE_N_ELEMENTS(clipboard_formats)
-
-typedef struct ImageType {
-    uint32_t type;
-    DWORD cximage_format;
-} ImageType;
-
-static const ImageType image_types[] = {
-    {VD_AGENT_CLIPBOARD_IMAGE_PNG, CXIMAGE_FORMAT_PNG},
-    {VD_AGENT_CLIPBOARD_IMAGE_BMP, CXIMAGE_FORMAT_BMP},
-};
 
 typedef struct ALIGN_VC VDIChunk {
     VDIChunkHeader hdr;
@@ -725,23 +715,19 @@ bool VDAgent::handle_clipboard(VDAgentClipboard* clipboard, uint32_t size)
     if (clipboard->type == VD_AGENT_CLIPBOARD_NONE) {
         goto fin;
     }
+    format = get_clipboard_format(clipboard->type);
     switch (clipboard->type) {
     case VD_AGENT_CLIPBOARD_UTF8_TEXT:
         clip_data = utf8_alloc((LPCSTR)clipboard->data, size);
         break;
     case VD_AGENT_CLIPBOARD_IMAGE_PNG:
-    case VD_AGENT_CLIPBOARD_IMAGE_BMP: {
-        DWORD cximage_format = get_cximage_format(clipboard->type);
-        ASSERT(cximage_format);
-        CxImage image(clipboard->data, size, cximage_format);
-        clip_data = image.CopyToHandle();
+    case VD_AGENT_CLIPBOARD_IMAGE_BMP:
+        clip_data = get_image_handle(*clipboard, size, format);
         break;
-    }
     default:
         vd_printf("Unsupported clipboard type %u", clipboard->type);
         goto fin;
     }
-    format = get_clipboard_format(clipboard->type);
     if (format == 0) {
         vd_printf("Unknown clipboard format, type %u", clipboard->type);
         goto fin;
@@ -1104,7 +1090,6 @@ bool VDAgent::handle_clipboard_request(VDAgentClipboardRequest* clipboard_reques
     uint8_t* new_data = NULL;
     long new_size = 0;
     size_t len = 0;
-    CxImage image;
     VDAgentClipboard* clipboard = NULL;
 
     if (_clipboard_owner != owner_guest) {
@@ -1135,28 +1120,12 @@ bool VDAgent::handle_clipboard_request(VDAgentClipboardRequest* clipboard_reques
         new_size = WideCharToMultiByte(CP_UTF8, 0, (LPCWSTR)new_data, (int)len, NULL, 0, NULL, NULL);
         break;
     case VD_AGENT_CLIPBOARD_IMAGE_PNG:
-    case VD_AGENT_CLIPBOARD_IMAGE_BMP: {
-        DWORD cximage_format = get_cximage_format(clipboard_request->type);
-        HPALETTE pal = 0;
-
-        ASSERT(cximage_format);
-        if (IsClipboardFormatAvailable(CF_PALETTE)) {
-            pal = (HPALETTE)GetClipboardData(CF_PALETTE);
-        }
-        if (!image.CreateFromHBITMAP((HBITMAP)clip_data, pal)) {
-            vd_printf("Image create from handle failed");
-            break;
-        }
-        if (!image.Encode(new_data, new_size, cximage_format)) {
-            vd_printf("Image encode to type %u failed", clipboard_request->type);
-            break;
-        }
-        vd_printf("Image encoded to %lu bytes", new_size);
+    case VD_AGENT_CLIPBOARD_IMAGE_BMP:
+        new_data = get_raw_clipboard_image(*clipboard_request, clip_data, new_size);
         break;
     }
-    }
 
-    if (!new_size) {
+    if (!new_size || !new_data) {
         vd_printf("clipboard is empty");
         goto handle_clipboard_request_fail;
     }
@@ -1184,7 +1153,7 @@ bool VDAgent::handle_clipboard_request(VDAgentClipboardRequest* clipboard_reques
     case VD_AGENT_CLIPBOARD_IMAGE_PNG:
     case VD_AGENT_CLIPBOARD_IMAGE_BMP:
         memcpy(clipboard->data, new_data, new_size);
-        image.FreeMemory(new_data);
+        free_raw_clipboard_image(new_data);
         break;
     }
     CloseClipboard();
@@ -1237,16 +1206,6 @@ uint32_t VDAgent::get_clipboard_type(uint32_t format) const
     for (const uint32_t* ptype = types; *ptype; ptype++) {
         if (_grab_types.find(*ptype) != _grab_types.end()) {
             return *ptype;
-        }
-    }
-    return 0;
-}
-
-DWORD VDAgent::get_cximage_format(uint32_t type) const
-{
-    for (unsigned int i = 0; i < SPICE_N_ELEMENTS(image_types); i++) {
-        if (image_types[i].type == type) {
-            return image_types[i].cximage_format;
         }
     }
     return 0;

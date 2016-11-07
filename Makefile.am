@@ -42,6 +42,8 @@ vdagent_SOURCES =			\
 	vdagent/vdagent.cpp		\
 	vdagent/as_user.cpp		\
 	vdagent/as_user.h		\
+	vdagent/image.cpp		\
+	vdagent/image.h			\
 	$(NULL)
 
 vdagent_rc.$(OBJEXT): vdagent/vdagent.rc
