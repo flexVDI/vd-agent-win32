@@ -42,6 +42,7 @@ AC_DEFINE_UNQUOTED([BUILD_YEAR], "$BUILD_YEAR", [Build year])
 # Check for programs
 AC_PROG_CC
 AC_PROG_CXX
+AX_CXX_COMPILE_STDCXX_11
 AM_PROG_CC_C_O
 AC_PROG_INSTALL
 AC_CHECK_TOOL(WINDRES, [windres])
@@ -99,9 +100,6 @@ AC_SUBST(WARNINGFLAGS_C)
 dnl ---------------------------------------------------------------------------
 dnl - Check library dependencies
 dnl ---------------------------------------------------------------------------
-
-PKG_CHECK_MODULES(CXIMAGE, [cximage])
-CXIMAGE_LIBS=`$PKG_CONFIG --static --libs cximage`
 
 dnl ---------------------------------------------------------------------------
 dnl - Makefiles, etc.

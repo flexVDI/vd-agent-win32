@@ -23,8 +23,8 @@ LIBS = -lversion
 
 bin_PROGRAMS = vdagent vdservice
 
-vdagent_LDADD = -lwtsapi32 $(CXIMAGE_LIBS) vdagent_rc.$(OBJEXT)
-vdagent_CXXFLAGS = $(AM_CXXFLAGS) $(CXIMAGE_CFLAGS)
+vdagent_LDADD = -lwtsapi32 -lgdi32 vdagent_rc.$(OBJEXT)
+vdagent_CXXFLAGS = $(AM_CXXFLAGS)
 vdagent_LDFLAGS = $(AM_LDFLAGS) -Wl,--subsystem,windows
 vdagent_SOURCES =			\
 	common/vdcommon.cpp             \

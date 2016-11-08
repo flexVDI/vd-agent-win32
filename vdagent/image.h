@@ -18,6 +18,27 @@
 #ifndef VDAGENT_IMAGE_H_
 #define VDAGENT_IMAGE_H_
 
+class ImageCoder
+{
+public:
+    ImageCoder() {};
+    virtual ~ImageCoder() {}
+    virtual size_t get_dib_size(const uint8_t *data, size_t size)=0;
+    virtual void get_dib_data(uint8_t *dib, const uint8_t *data, size_t size)=0;
+    virtual uint8_t *from_bitmap(const BITMAPINFO& info, const void *bits, long &size)=0;
+private:
+    ImageCoder(const ImageCoder& rhs);
+    void operator=(const ImageCoder &rhs);
+};
+
+/**
+ * Compute stride in bytes of a DIB
+ */
+static inline size_t compute_dib_stride(unsigned int width, unsigned int bit_count)
+{
+    return ((width * bit_count + 31u) & ~31u) / 8u;
+}
+
 /**
  * Returns image to put in the clipboard.
  *
