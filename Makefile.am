@@ -23,8 +23,8 @@ LIBS = -lversion
 
 bin_PROGRAMS = vdagent vdservice
 
-vdagent_LDADD = -lwtsapi32 -lgdi32 vdagent_rc.$(OBJEXT)
-vdagent_CXXFLAGS = $(AM_CXXFLAGS)
+vdagent_LDADD = $(LIBPNG_LIBS) $(ZLIB_LIBS) -lwtsapi32 -lgdi32 vdagent_rc.$(OBJEXT)
+vdagent_CXXFLAGS = $(AM_CXXFLAGS) $(LIBPNG_CFLAGS)
 vdagent_LDFLAGS = $(AM_LDFLAGS) -Wl,--subsystem,windows
 vdagent_SOURCES =			\
 	common/vdcommon.cpp             \
@@ -44,6 +44,8 @@ vdagent_SOURCES =			\
 	vdagent/as_user.h		\
 	vdagent/image.cpp		\
 	vdagent/image.h			\
+	vdagent/imagepng.cpp		\
+	vdagent/imagepng.h		\
 	$(NULL)
 
 vdagent_rc.$(OBJEXT): vdagent/vdagent.rc

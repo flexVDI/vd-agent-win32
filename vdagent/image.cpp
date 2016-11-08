@@ -21,9 +21,9 @@
 
 #include "vdcommon.h"
 #include "image.h"
+#include "imagepng.h"
 
 ImageCoder *create_bitmap_coder();
-ImageCoder *create_png_coder();
 
 static ImageCoder *get_coder(uint32_t vdagent_type)
 {
@@ -171,10 +171,4 @@ uint8_t *BitmapCoder::from_bitmap(const BITMAPINFO& info, const void *bits, long
 ImageCoder *create_bitmap_coder()
 {
     return new BitmapCoder();
-}
-
-// TODO
-ImageCoder *create_png_coder()
-{
-    return NULL;
 }
