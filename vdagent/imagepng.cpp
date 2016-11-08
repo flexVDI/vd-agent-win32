@@ -19,6 +19,7 @@
 
 #include <png.h>
 #include <algorithm>
+#include <vector>
 
 #include "imagepng.h"
 
@@ -48,6 +49,43 @@ static void read_from_bufio(png_structp png, png_bytep out, png_size_t size)
         png_error(png, "read past end");
     memcpy(out, io.buf+io.pos, size);
     io.pos += size;
+}
+
+struct WriteBufferIo {
+    uint8_t *buf;
+    uint32_t pos, size;
+    WriteBufferIo():
+        buf(NULL), pos(0), size(0)
+    {}
+    ~WriteBufferIo() { free(buf); }
+    uint8_t *release() {
+        uint8_t *res = buf;
+        buf = NULL;
+        pos = size = 0;
+        return res;
+    }
+};
+
+static void write_to_bufio(png_structp png, png_bytep in, png_size_t size)
+{
+    WriteBufferIo& io(*(WriteBufferIo*)png_get_io_ptr(png));
+    if (io.pos + size > io.size) {
+        uint32_t new_size = io.size ? io.size * 2 : 4096;
+        while (io.pos + size >= new_size) {
+            new_size *= 2;
+        }
+        uint8_t *p = (uint8_t*) realloc(io.buf, new_size);
+        if (!p)
+            png_error(png, "out of memory");
+        io.buf = p;
+        io.size = new_size;
+    }
+    memcpy(io.buf+io.pos, in, size);
+    io.pos += size;
+}
+
+static void flush_bufio(png_structp png)
+{
 }
 
 size_t PngCoder::get_dib_size(const uint8_t *data, size_t size)
@@ -233,10 +271,84 @@ void PngCoder::get_dib_data(uint8_t *dib, const uint8_t *data, size_t size)
     convert_to_dib(dib, data, size);
 }
 
-uint8_t *PngCoder::from_bitmap(const BITMAPINFO& info, const void *bits, long &size)
+uint8_t *PngCoder::from_bitmap(const BITMAPINFO& bmp_info, const void *bits, long &size)
 {
-    // TODO not implemented
-    return NULL;
+    // this vector is here to avoid leaking resources if libpng use setjmp/longjmp
+    std::vector<png_color> palette;
+    WriteBufferIo io;
+
+    png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+    if (!png)
+        return 0;
+
+    png_infop info = png_create_info_struct(png);
+    if (!info) {
+        png_destroy_write_struct(&png, &info);
+        return 0;
+    }
+
+    if (setjmp(png_jmpbuf(png))) {
+        png_destroy_write_struct(&png, &info);
+        return 0;
+    }
+
+    png_set_write_fn(png, &io, write_to_bufio, flush_bufio);
+
+    const BITMAPINFOHEADER& head(bmp_info.bmiHeader);
+    int color_type;
+    int out_bits = head.biBitCount;
+    switch (out_bits) {
+    case 1:
+    case 4:
+    case 8:
+        color_type = PNG_COLOR_TYPE_PALETTE;
+        break;
+    case 24:
+    case 32:
+        png_set_bgr(png);
+        color_type = PNG_COLOR_TYPE_RGB;
+        break;
+    default:
+        png_error(png, "BMP bit count not supported");
+        break;
+    }
+    // TODO detect gray
+    png_set_IHDR(png, info, head.biWidth, head.biHeight,
+                 out_bits > 8 ? 8 : out_bits, color_type,
+                 PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT,
+                 PNG_FILTER_TYPE_DEFAULT);
+
+    // palette
+    if (color_type == PNG_COLOR_TYPE_PALETTE) {
+        palette.resize(head.biClrUsed);
+        const RGBQUAD *rgb = bmp_info.bmiColors;
+        for (unsigned int color = 0; color < head.biClrUsed; ++color) {
+            palette[color].red = rgb->rgbRed;
+            palette[color].green = rgb->rgbGreen;
+            palette[color].blue = rgb->rgbBlue;
+            ++rgb;
+        }
+        png_set_PLTE(png, info, &palette[0], palette.size());
+    }
+
+    png_write_info(png, info);
+
+    const unsigned int width = head.biWidth;
+    const unsigned int height = head.biHeight;
+    const size_t stride = compute_dib_stride(width, out_bits);
+    const size_t image_size = stride * height;
+
+    // now do the actual conversion!
+    const uint8_t *src = (const uint8_t*)bits + image_size;
+    for (unsigned int row = 0; row < height; ++row) {
+        src -= stride;
+        png_write_row(png, src);
+    }
+    png_write_end(png, NULL);
+
+    png_destroy_write_struct(&png, &info);
+    size = io.pos;
+    return io.release();
 }
 
 ImageCoder *create_png_coder()
