@@ -87,6 +87,7 @@ CLEANFILES = spice-vdagent-$(WIXL_ARCH)-$(VERSION)$(BUILDID).msi
 
 EXTRA_DIST +=			\
 	$(top_srcdir)/.version	\
+	common/version.rc	\
 	tests/clipboard.py	\
 	vdagent.sln		\
 	vdagent/resource.h	\
