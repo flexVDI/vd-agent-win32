@@ -41,18 +41,18 @@ private:
     FILE* _handle;
 };
 
-enum {
+typedef enum {
   LOG_DEBUG,
   LOG_INFO,
   LOG_WARN,
   LOG_ERROR,
   LOG_FATAL
-};
+} VDLogLevel;
 
 #ifdef _DEBUG
-static unsigned int log_level = LOG_DEBUG;
+static const VDLogLevel log_level = LOG_DEBUG;
 #else
-static unsigned int log_level = LOG_INFO;
+static const VDLogLevel log_level = LOG_INFO;
 #endif
 
 #define PRINT_LINE(type, format, datetime, ms, ...)                     \
