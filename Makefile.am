@@ -45,7 +45,7 @@ vdagent_SOURCES =			\
 	$(NULL)
 
 vdagent_rc.$(OBJEXT): vdagent/vdagent.rc
-	$(AM_V_GEN)$(WINDRES) -i $< -o $@
+	$(AM_V_GEN)$(WINDRES) -I $(top_builddir)/common -i $< -o $@
 
 MAINTAINERCLEANFILES += vdagent_rc.$(OBJEXT)
 
@@ -60,7 +60,7 @@ vdservice_SOURCES =			\
 	$(NULL)
 
 vdservice_rc.$(OBJEXT): vdservice/vdservice.rc
-	$(AM_V_GEN)$(WINDRES) -i $< -o $@
+	$(AM_V_GEN)$(WINDRES) -I $(top_builddir)/common -i $< -o $@
 
 MAINTAINERCLEANFILES += vdservice_rc.$(OBJEXT)
 
@@ -87,6 +87,7 @@ CLEANFILES = spice-vdagent-$(WIXL_ARCH)-$(VERSION)$(BUILDID).msi
 
 EXTRA_DIST +=			\
 	$(top_srcdir)/.version	\
+	config.h		\
 	common/version.rc	\
 	tests/clipboard.py	\
 	vdagent.sln		\

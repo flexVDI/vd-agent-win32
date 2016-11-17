@@ -32,6 +32,12 @@ fi
 build=`expr $micro \* 256 + $buildid`
 WINDOWS_PRODUCTVERSION="$major.$minor.$build"
 AC_SUBST([WINDOWS_PRODUCTVERSION])
+microdigit=`echo $micro | cut -d- -f1`
+RC_PRODUCTVERSION="$major, $minor, $microdigit, 0"
+AC_DEFINE_UNQUOTED([RC_PRODUCTVERSION_STR], "$RC_PRODUCTVERSION", [Resource product version])
+AC_DEFINE_UNQUOTED([RC_PRODUCTVERSION], [$RC_PRODUCTVERSION], [Resource product version])
+BUILD_YEAR=`date +%Y`
+AC_DEFINE_UNQUOTED([BUILD_YEAR], "$BUILD_YEAR", [Build year])
 
 # Check for programs
 AC_PROG_CC

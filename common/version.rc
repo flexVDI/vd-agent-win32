@@ -1,6 +1,8 @@
 /////////////////////////////////////////////////////////////////////////////
 // English (U.S.) resources
 
+#include "../config.h"
+
 #if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
 #ifdef _WIN32
 LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
@@ -13,8 +15,8 @@ LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,5,1,0
- PRODUCTVERSION 0,5,1,0
+ FILEVERSION RC_PRODUCTVERSION
+ PRODUCTVERSION RC_PRODUCTVERSION
  FILEFLAGSMASK 0x17L
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -31,12 +33,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Red Hat Inc."
             VALUE "FileDescription", FILE_DESCRIPTION
-            VALUE "FileVersion", "0, 5, 1, 0"
+            VALUE "FileVersion", RC_PRODUCTVERSION_STR
             VALUE "InternalName", INTERNAL_NAME
-            VALUE "LegalCopyright", "Copyright (c) 2009  Red Hat Inc. and/or its affiliates"
+            VALUE "LegalCopyright", "Copyright (c) 2009-" BUILD_YEAR "  Red Hat Inc. and/or its affiliates"
             VALUE "OriginalFilename", ORIGINAL_FILENAME
             VALUE "ProductName", "Red Hat Spice"
-            VALUE "ProductVersion", "0, 5, 1, 0"
+            VALUE "ProductVersion", RC_PRODUCTVERSION_STR
         END
     END
     BLOCK "VarFileInfo"
