@@ -85,6 +85,7 @@ private:
             return _events_count - 1;
         }
     }
+    bool agent_alive() const { return _agent_proc_info.hProcess != NULL; }
 private:
     SERVICE_STATUS _status;
     SERVICE_STATUS_HANDLE _status_handle;
@@ -101,7 +102,6 @@ private:
     DWORD _last_agent_restart_time;
     int _agent_restarts;
     int _system_version;
-    bool _agent_alive;
     bool _running;
     VDLog* _log;
     unsigned _events_count;
@@ -114,7 +114,6 @@ VDService::VDService()
     , _session_id (0)
     , _last_agent_restart_time (0)
     , _agent_restarts (0)
-    , _agent_alive (false)
     , _running (false)
     , _log (NULL)
     , _events_count(0)
@@ -428,7 +427,7 @@ bool VDService::execute()
                         WAIT_OBJECT_0) {
                     handle_control_event();
                 }
-                if (_running && !_agent_alive) {
+                if (_running && !agent_alive()) {
                     restart_agent(false);
                 }
             }
@@ -731,7 +730,6 @@ bool VDService::launch_agent()
     }
     CloseHandle(_agent_proc_info.hThread);
     _agent_proc_info.hThread = NULL;
-    _agent_alive = true;
     return true;
 }
 
@@ -742,10 +740,9 @@ bool VDService::kill_agent()
     HANDLE proc_handle;
     bool ret = true;
 
-    if (!_agent_alive) {
+    if (!agent_alive()) {
         return true;
     }
-    _agent_alive = false;
     proc_handle = _agent_proc_info.hProcess;
     _agent_proc_info.hProcess = 0;
     SetEvent(_agent_stop_event);
