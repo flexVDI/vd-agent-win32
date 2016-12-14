@@ -444,7 +444,7 @@ bool VDService::execute()
     return true;
 }
 
-DWORD64 marshall_string(LPCWSTR str, DWORD max_size, LPBYTE* next_buf, DWORD* used_bytes)
+static DWORD64 marshall_string(LPCWSTR str, DWORD max_size, LPBYTE* next_buf, DWORD* used_bytes)
 {
     DWORD offset = *used_bytes;
 
@@ -486,14 +486,15 @@ typedef struct CreateProcessRet {
     PROCESS_INFORMATION process_information;
 } CreateProcessRet;
 
-BOOL create_session_process_as_user(IN DWORD session_id, IN BOOL use_default_token, IN HANDLE token,
-                                    IN LPCWSTR application_name, IN LPWSTR command_line,
-                                    IN LPSECURITY_ATTRIBUTES process_attributes,
-                                    IN LPSECURITY_ATTRIBUTES thread_attributes,
-                                    IN BOOL inherit_handles, IN DWORD creation_flags,
-                                    IN LPVOID environment, IN LPCWSTR current_directory,
-                                    IN LPSTARTUPINFOW startup_info,
-                                    OUT LPPROCESS_INFORMATION process_information)
+static BOOL
+create_session_process_as_user(IN DWORD session_id, IN BOOL use_default_token, IN HANDLE token,
+                               IN LPCWSTR application_name, IN LPWSTR command_line,
+                               IN LPSECURITY_ATTRIBUTES process_attributes,
+                               IN LPSECURITY_ATTRIBUTES thread_attributes,
+                               IN BOOL inherit_handles, IN DWORD creation_flags,
+                               IN LPVOID environment, IN LPCWSTR current_directory,
+                               IN LPSTARTUPINFOW startup_info,
+                               OUT LPPROCESS_INFORMATION process_information)
 {
     WCHAR win_sta_path[MAX_PATH];
     HINSTANCE win_sta_handle;
@@ -624,12 +625,13 @@ BOOL create_session_process_as_user(IN DWORD session_id, IN BOOL use_default_tok
     return ret;
 }
 
-BOOL create_process_as_user(IN DWORD session_id, IN LPCWSTR application_name,
-                            IN LPWSTR command_line, IN LPSECURITY_ATTRIBUTES process_attributes,
-                            IN LPSECURITY_ATTRIBUTES thread_attributes, IN BOOL inherit_handles,
-                            IN DWORD creation_flags, IN LPVOID environment,
-                            IN LPCWSTR current_directory, IN LPSTARTUPINFOW startup_info,
-                            OUT LPPROCESS_INFORMATION process_information)
+static BOOL
+create_process_as_user(IN DWORD session_id, IN LPCWSTR application_name,
+                       IN LPWSTR command_line, IN LPSECURITY_ATTRIBUTES process_attributes,
+                       IN LPSECURITY_ATTRIBUTES thread_attributes, IN BOOL inherit_handles,
+                       IN DWORD creation_flags, IN LPVOID environment,
+                       IN LPCWSTR current_directory, IN LPSTARTUPINFOW startup_info,
+                       OUT LPPROCESS_INFORMATION process_information)
 {
     PROCESSENTRY32 proc_entry;
     DWORD winlogon_pid = 0;
