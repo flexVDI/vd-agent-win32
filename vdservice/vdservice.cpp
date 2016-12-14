@@ -729,6 +729,8 @@ bool VDService::launch_agent()
         vd_printf("CreateProcess() failed: %lu", GetLastError());
         return false;
     }
+    CloseHandle(_agent_proc_info.hThread);
+    _agent_proc_info.hThread = NULL;
     _agent_alive = true;
     return true;
 }
@@ -769,7 +771,6 @@ bool VDService::kill_agent()
     }
     ResetEvent(_agent_stop_event);
     CloseHandle(proc_handle);
-    CloseHandle(_agent_proc_info.hThread);
     ZeroMemory(&_agent_proc_info, sizeof(_agent_proc_info));
     return ret;
 }
