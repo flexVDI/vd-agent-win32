@@ -25,7 +25,7 @@
 
 //#define DEBUG_VDSERVICE
 
-#define VD_SERVICE_DISPLAY_NAME TEXT("RHEV Spice Agent")
+#define VD_SERVICE_DISPLAY_NAME TEXT("Spice Agent")
 #define VD_SERVICE_NAME         TEXT("vdservice")
 #define VD_SERVICE_DESCRIPTION  TEXT("Enables Spice event injection and display configuration.")
 #define VD_SERVICE_LOG_PATH     TEXT("%svdservice.log")
