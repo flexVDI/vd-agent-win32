@@ -31,17 +31,22 @@
 #include "file_xfer.h"
 #include "as_user.h"
 
-FileXfer::~FileXfer()
+void FileXfer::reset()
 {
     FileXferTasks::iterator iter;
     FileXferTask* task;
 
     for (iter = _tasks.begin(); iter != _tasks.end(); iter++) {
         task = iter->second;
-        CloseHandle(task->handle);
-        DeleteFile(task->name);
+        task->cancel();
         delete task;
     }
+    _tasks.clear();
+}
+
+FileXfer::~FileXfer()
+{
+    reset();
 }
 
 void FileXfer::handle_start(VDAgentFileXferStartMessage* start,
@@ -152,6 +157,12 @@ fin:
     return true;
 }
 
+void FileXferTask::cancel()
+{
+    CloseHandle(handle);
+    DeleteFile(name);
+}
+
 void FileXfer::handle_status(VDAgentFileXferStatusMessage* status)
 {
     FileXferTasks::iterator iter;
@@ -168,8 +179,7 @@ void FileXfer::handle_status(VDAgentFileXferStatusMessage* status)
         return;
     }
     task = iter->second;
-    CloseHandle(task->handle);
-    DeleteFile(task->name);
+    task->cancel();
     _tasks.erase(iter);
     delete task;
 }

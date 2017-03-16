@@ -112,7 +112,7 @@ private:
     DWORD get_cximage_format(uint32_t type) const;
     enum { owner_none, owner_guest, owner_client };
     void set_clipboard_owner(int new_owner);
-    enum { CONTROL_STOP, CONTROL_DESKTOP_SWITCH, CONTROL_LOGON, CONTROL_CLIPBOARD };
+    enum { CONTROL_STOP, CONTROL_RESET, CONTROL_DESKTOP_SWITCH, CONTROL_LOGON, CONTROL_CLIPBOARD };
     void set_control_event(int control_command);
     void handle_control_event();
     VDIChunk* new_chunk(DWORD bytes = 0);
@@ -379,6 +379,11 @@ void VDAgent::handle_control_event()
         _control_queue.pop();
         vd_printf("Control command %d", control_command);
         switch (control_command) {
+        case CONTROL_RESET:
+            _file_xfer.reset();
+            set_control_event(CONTROL_CLIPBOARD);
+            set_clipboard_owner(owner_none);
+            break;
         case CONTROL_STOP:
             _running = false;
             break;
@@ -1321,8 +1326,8 @@ void VDAgent::dispatch_message(VDAgentMessage* msg, uint32_t port)
         break;
     }
     case VD_AGENT_CLIENT_DISCONNECTED:
-        vd_printf("Client disconnected, agent to be restarted");
-        set_control_event(CONTROL_STOP);
+        vd_printf("Client disconnected, resetting agent state");
+        set_control_event(CONTROL_RESET);
         break;
     case VD_AGENT_MAX_CLIPBOARD:
         res = handle_max_clipboard((VDAgentMaxClipboard*)msg->data, msg->size);
