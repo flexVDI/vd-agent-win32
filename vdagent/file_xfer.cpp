@@ -31,17 +31,22 @@
 #include "file_xfer.h"
 #include "as_user.h"
 
-FileXfer::~FileXfer()
+void FileXfer::reset()
 {
     FileXferTasks::iterator iter;
     FileXferTask* task;
 
     for (iter = _tasks.begin(); iter != _tasks.end(); iter++) {
         task = iter->second;
-        CloseHandle(task->handle);
-        DeleteFile(task->name);
+        task->cancel();
         delete task;
     }
+    _tasks.clear();
+}
+
+FileXfer::~FileXfer()
+{
+    reset();
 }
 
 void FileXfer::handle_start(VDAgentFileXferStartMessage* start,
@@ -127,7 +132,7 @@ bool FileXfer::handle_data(VDAgentFileXferDataMessage* data,
     if (task->pos > task->size) {
         vd_printf("file xfer is longer than expected");
         goto fin;
-    }  
+    }
     if (!WriteFile(task->handle, data->data, (DWORD)data->size,
                    &written, NULL) || written != data->size) {
         vd_printf("file write failed %lu", GetLastError());
@@ -152,14 +157,20 @@ fin:
     return true;
 }
 
+void FileXferTask::cancel()
+{
+    CloseHandle(handle);
+    DeleteFile(name);
+}
+
 void FileXfer::handle_status(VDAgentFileXferStatusMessage* status)
 {
     FileXferTasks::iterator iter;
     FileXferTask* task;
 
-    vd_printf("id %u result %u", status->id, status->result); 
+    vd_printf("id %u result %u", status->id, status->result);
     if (status->result != VD_AGENT_FILE_XFER_STATUS_CANCELLED) {
-        vd_printf("only cancel is premitted");
+        vd_printf("only cancel is permitted");
         return;
     }
     iter = _tasks.find(status->id);
@@ -168,8 +179,7 @@ void FileXfer::handle_status(VDAgentFileXferStatusMessage* status)
         return;
     }
     task = iter->second;
-    CloseHandle(task->handle);
-    DeleteFile(task->name);
+    task->cancel();
     _tasks.erase(iter);
     delete task;
 }

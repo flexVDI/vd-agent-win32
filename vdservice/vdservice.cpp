@@ -25,7 +25,7 @@
 
 //#define DEBUG_VDSERVICE
 
-#define VD_SERVICE_DISPLAY_NAME TEXT("RHEV Spice Agent")
+#define VD_SERVICE_DISPLAY_NAME TEXT("Spice Agent")
 #define VD_SERVICE_NAME         TEXT("vdservice")
 #define VD_SERVICE_DESCRIPTION  TEXT("Enables Spice event injection and display configuration.")
 #define VD_SERVICE_LOG_PATH     TEXT("%svdservice.log")
@@ -59,14 +59,13 @@ typedef std::queue<int> VDControlQueue;
 
 class VDService {
 public:
-    static VDService* get();
-    ~VDService();
-    bool run();
-    bool install();
-    bool uninstall();
+    static bool run();
+    static bool install();
+    static bool uninstall();
 
 private:
     VDService();
+    ~VDService();
     bool execute();
     void stop();
     static DWORD WINAPI control_handler(DWORD control, DWORD event_type,
@@ -87,7 +86,6 @@ private:
         }
     }
 private:
-    static VDService* _singleton;
     SERVICE_STATUS _status;
     SERVICE_STATUS_HANDLE _status_handle;
     PROCESS_INFORMATION _agent_proc_info;
@@ -109,16 +107,6 @@ private:
     unsigned _events_count;
 };
 
-VDService* VDService::_singleton = NULL;
-
-VDService* VDService::get()
-{
-    if (!_singleton) {
-        _singleton = new VDService();
-    }
-    return (VDService*)_singleton;
-}
-
 VDService::VDService()
     : _status_handle (0)
     , _events (NULL)
@@ -136,16 +124,13 @@ VDService::VDService()
     _control_event = CreateEvent(NULL, FALSE, FALSE, NULL);
     _agent_stop_event = CreateEvent(NULL, FALSE, FALSE, VD_AGENT_STOP_EVENT);
     _agent_path[0] = wchar_t('\0');
-    MUTEX_INIT(_agent_mutex);
-    MUTEX_INIT(_control_mutex);
-    _singleton = this;
 }
 
 VDService::~VDService()
 {
     CloseHandle(_agent_stop_event);
     CloseHandle(_control_event);
-    delete _events;
+    delete[] _events;
     delete _log;
 }
 
@@ -246,24 +231,23 @@ bool VDService::uninstall()
     return ret;
 }
 
-const char* session_events[] = {
+static const char* const session_events[] = {
     "INVALID", "CONNECT", "DISCONNECT", "REMOTE_CONNECT", "REMOTE_DISCONNECT", "LOGON", "LOGOFF",
     "LOCK", "UNLOCK", "REMOTE_CONTROL"
 };
 
 void VDService::set_control_event(int control_command)
 {
-    MUTEX_LOCK(_control_mutex);
+    MutexLocker lock(_control_mutex);
     _control_queue.push(control_command);
     if (_control_event && !SetEvent(_control_event)) {
         vd_printf("SetEvent() failed: %lu", GetLastError());
     }
-    MUTEX_UNLOCK(_control_mutex);
 }
 
 void VDService::handle_control_event()
 {
-    MUTEX_LOCK(_control_mutex);
+    MutexLocker lock(_control_mutex);
     while (_control_queue.size()) {
         int control_command = _control_queue.front();
         _control_queue.pop();
@@ -278,13 +262,12 @@ void VDService::handle_control_event()
             vd_printf("Unsupported control command %u", control_command);
         }
     }
-    MUTEX_UNLOCK(_control_mutex);
 }
 
 DWORD WINAPI VDService::control_handler(DWORD control, DWORD event_type, LPVOID event_data,
                                         LPVOID context)
 {
-    VDService* s = _singleton;
+    VDService* s = static_cast<VDService *>(context);
     DWORD ret = NO_ERROR;
 
     ASSERT(s);
@@ -322,7 +305,7 @@ DWORD WINAPI VDService::control_handler(DWORD control, DWORD event_type, LPVOID 
 
 VOID WINAPI VDService::main(DWORD argc, TCHAR* argv[])
 {
-    VDService* s = _singleton;
+    VDService* s = new VDService;
     SERVICE_STATUS* status;
     TCHAR log_path[MAX_PATH];
     TCHAR full_path[MAX_PATH];
@@ -352,7 +335,7 @@ VOID WINAPI VDService::main(DWORD argc, TCHAR* argv[])
     status->dwWaitHint = 0;
 #ifndef  DEBUG_VDSERVICE
     s->_status_handle = RegisterServiceCtrlHandlerEx(VD_SERVICE_NAME, &VDService::control_handler,
-                                                     NULL);
+                                                     s);
     if (!s->_status_handle) {
         vd_printf("RegisterServiceCtrlHandler failed\n");
         return;
@@ -382,6 +365,7 @@ VOID WINAPI VDService::main(DWORD argc, TCHAR* argv[])
     SetServiceStatus(s->_status_handle, status);
 #endif //DEBUG_VDSERVICE
     vd_printf("***Service stopped***");
+    delete s;
 }
 
 bool VDService::execute()
@@ -793,7 +777,7 @@ bool VDService::restart_agent(bool normal_restart)
     DWORD time = GetTickCount();
     bool ret = true;
 
-    MUTEX_LOCK(_agent_mutex);
+    MutexLocker lock(_agent_mutex);
     if (!normal_restart && ++_agent_restarts > VD_AGENT_MAX_RESTARTS) {
         vd_printf("Agent restarted too many times");
         ret = false;
@@ -806,7 +790,6 @@ bool VDService::restart_agent(bool normal_restart)
         _last_agent_restart_time = time;
         ret = true;
     }
-    MUTEX_UNLOCK(_agent_mutex);
     return ret;
 }
 
@@ -839,18 +822,16 @@ int _tmain(int argc, TCHAR* argv[])
         printf("vdservice is not supported in this system version\n");
         return -1;
     }
-    VDService* vdservice = VDService::get();
     if (argc > 1) {
         if (lstrcmpi(argv[1], TEXT("install")) == 0) {
-            success = vdservice->install();
+            success = VDService::install();
         } else if (lstrcmpi(argv[1], TEXT("uninstall")) == 0) {
-            success = vdservice->uninstall();
+            success = VDService::uninstall();
         } else {
             printf("Use: vdservice install / uninstall\n");
         }
     } else {
-        success = vdservice->run();
+        success = VDService::run();
     }
-    delete vdservice;
     return (success ? 0 : -1);
 }

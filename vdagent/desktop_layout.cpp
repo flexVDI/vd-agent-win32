@@ -18,6 +18,7 @@
 #include <spice/qxl_windows.h>
 #include <spice/qxl_dev.h>
 #include "desktop_layout.h"
+#include "display_configuration.h"
 #include "vdlog.h"
 
 #ifdef __MINGW32__
@@ -35,15 +36,16 @@ void DisplayMode::set_res(DWORD width, DWORD height, DWORD depth)
 DesktopLayout::DesktopLayout()
     : _total_width (0)
     , _total_height (0)
-    , _send_monitors_position(false)
+    , _display_config (NULL)
 {
-    MUTEX_INIT(_mutex);
+    _display_config = DisplayConfig::create_config();
     get_displays();
 }
 
 DesktopLayout::~DesktopLayout()
 {
     clean_displays();
+    delete _display_config;
 }
 
 void DesktopLayout::get_displays()
@@ -59,6 +61,7 @@ void DesktopLayout::get_displays()
         unlock();
         return;
     }
+    _display_config->update_config_path();
     clean_displays();
     ZeroMemory(&dev_info, sizeof(dev_info));
     dev_info.cb = sizeof(dev_info);
@@ -82,12 +85,13 @@ void DesktopLayout::get_displays()
                 _displays[i] = NULL;
             }
         }
-        attached = !!(dev_info.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP);
+        attached = _display_config->is_attached(&dev_info);
+
         EnumDisplaySettings(dev_info.DeviceName, ENUM_CURRENT_SETTINGS, &mode);
         _displays[display_id] = new DisplayMode(mode.dmPosition.x, mode.dmPosition.y,
                                                 mode.dmPelsWidth, mode.dmPelsHeight,
                                                 mode.dmBitsPerPel, attached);
-        update_monitor_config(dev_info.DeviceName, _displays[display_id]);
+        _display_config->update_monitor_config(dev_info.DeviceName, _displays[display_id], &mode);
     }
     normalize_displays_pos();
     unlock();
@@ -121,6 +125,7 @@ void DesktopLayout::set_displays()
         unlock();
         return;
     }
+    _display_config->update_config_path();
     ZeroMemory(&dev_info, sizeof(dev_info));
     dev_info.cb = sizeof(dev_info);
     ZeroMemory(&dev_mode, sizeof(dev_mode));
@@ -146,26 +151,30 @@ void DesktopLayout::set_displays()
             break;
         }
         DisplayMode * mode(_displays.at(display_id));
-        if (!init_dev_mode(dev_info.DeviceName, &dev_mode, mode, normal_x, normal_y, true)) {
+        if (!init_dev_mode(dev_info.DeviceName, &dev_mode, mode)) {
             vd_printf("No suitable mode found for display %S", dev_info.DeviceName);
             break;
         }
         vd_printf("Set display mode %lux%lu", dev_mode.dmPelsWidth, dev_mode.dmPelsHeight);
-        LONG ret = ChangeDisplaySettingsEx(dev_info.DeviceName, &dev_mode, NULL,
-                                           CDS_UPDATEREGISTRY | CDS_NORESET, NULL);
-        if (ret == DISP_CHANGE_SUCCESSFUL) {
+        if (_display_config->update_dev_mode_position(dev_info.DeviceName, &dev_mode,
+                                                     mode->_pos_x - normal_x,
+                                                     mode->_pos_y - normal_y)) {
             dev_sets++;
-            update_monitor_config(dev_info.DeviceName, mode);
+            _display_config->update_monitor_config(dev_info.DeviceName, mode, &dev_mode);
         }
         if (!is_qxl) {
             display_id++;
         }
     }
     if (dev_sets) {
-        ChangeDisplaySettingsEx(NULL, NULL, NULL, 0, NULL);
+        _display_config->update_display_settings();
         normalize_displays_pos();
     }
     unlock();
+}
+
+void DesktopLayout::set_position_configurable(bool flag) {
+    _display_config->set_monitors_config(flag);
 }
 
 // Normalize all display positions to non-negative coordinates and update total width and height of
@@ -265,125 +274,28 @@ bool DesktopLayout::get_qxl_device_id(WCHAR* device_key, DWORD* device_id)
     return key_found;
 }
 
-bool DesktopLayout::init_dev_mode(LPCTSTR dev_name, DEVMODE* dev_mode, DisplayMode* mode,
-                                  LONG normal_x, LONG normal_y, bool set_pos)
+bool DesktopLayout::init_dev_mode(LPCTSTR dev_name, DEVMODE* dev_mode, DisplayMode* mode)
 {
-    DWORD closest_diff = -1;
-    DWORD best = -1;
-    QXLEscapeSetCustomDisplay custom;
-    HDC hdc = NULL;
-    LONG ret;
-
     ZeroMemory(dev_mode, sizeof(DEVMODE));
     dev_mode->dmSize = sizeof(DEVMODE);
-    if (!mode || !mode->_attached) {
-        //Detach monitor
-        dev_mode->dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_POSITION;
+
+    //Update monitor state
+    MONITOR_STATE monitor_state = (!mode || !mode->_attached)? MONITOR_DETACHED : MONITOR_ATTACHED;
+    _display_config->set_monitor_state(dev_name, dev_mode, monitor_state);
+    if (monitor_state == MONITOR_DETACHED) {
         return true;
     }
 
-    hdc = CreateDC(dev_name, NULL, NULL, NULL);
-    if (!hdc) {
-        // for some reason, windows want those 3 flags to enable monitor
-        dev_mode->dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_POSITION;
-        dev_mode->dmPelsWidth = mode->_width;
-        dev_mode->dmPelsHeight = mode->_height;
-        ret = ChangeDisplaySettingsEx(dev_name, dev_mode, NULL, CDS_UPDATEREGISTRY, NULL);
-        if (ret == DISP_CHANGE_BADMODE) {
-            // custom resolution might not be set yet, use known resolution
-            // FIXME: this causes client temporary resize... a
-            // solution would involve passing custom resolution before
-            // driver initialization, perhaps through registry
-            dev_mode->dmPelsWidth = 640;
-            dev_mode->dmPelsHeight = 480;
-            ret = ChangeDisplaySettingsEx(dev_name, dev_mode, NULL, CDS_UPDATEREGISTRY, NULL);
-        }
-
-        vd_printf("attach %ld", ret);
-        hdc = CreateDC(dev_name, NULL, NULL, NULL);
-    }
-
-    if (!hdc) {
-        vd_printf("failed to create DC");
+    // Update custom resolution
+    dev_mode->dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_POSITION;
+    dev_mode->dmPelsWidth = mode->_width;
+    dev_mode->dmPelsHeight = mode->_height;
+    dev_mode->dmBitsPerPel = mode->_depth;
+    if (!_display_config->custom_display_escape(dev_name, dev_mode))
         return false;
-    } else {
-        // Update custom resolution
-        custom.xres = mode->_width;
-        custom.yres = mode->_height;
-        custom.bpp = mode->_depth;
-
-        int err = ExtEscape(hdc, QXL_ESCAPE_SET_CUSTOM_DISPLAY,
-                            sizeof(QXLEscapeSetCustomDisplay), (LPCSTR)&custom, 0, NULL);
-        if (err <= 0) {
-            vd_printf("can't set custom display, perhaps an old driver");
-        }
-        DeleteDC(hdc);
-    }
-
-    // force refresh mode table
-    DEVMODE tempDevMode;
-    ZeroMemory(&tempDevMode, sizeof (tempDevMode));
-    tempDevMode.dmSize = sizeof(DEVMODE);
-    EnumDisplaySettings(dev_name, 0xffffff, &tempDevMode);
-
-    //Find the closest size which will fit within the monitor
-    for (DWORD i = 0; EnumDisplaySettings(dev_name, i, dev_mode); i++) {
-        if (dev_mode->dmPelsWidth > mode->_width ||
-            dev_mode->dmPelsHeight > mode->_height ||
-            dev_mode->dmBitsPerPel != mode->_depth) {
-            continue;
-        }
-        DWORD wdiff = mode->_width - dev_mode->dmPelsWidth;
-        DWORD hdiff = mode->_height - dev_mode->dmPelsHeight;
-        DWORD diff = wdiff * wdiff + hdiff * hdiff;
-        if (diff < closest_diff) {
-            closest_diff = diff;
-            best = i;
-        }
-    }
-    if (best == (DWORD)-1 || !EnumDisplaySettings(dev_name, best, dev_mode)) {
-        return false;
-    }
-    dev_mode->dmFields = DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT;
-    if (set_pos) {
-        //Convert the position so that the primary is always at (0,0)
-        dev_mode->dmPosition.x = mode->_pos_x - normal_x;
-        dev_mode->dmPosition.y = mode->_pos_y - normal_y;
-        dev_mode->dmFields |= DM_POSITION;
-    }
 
     // update current DisplayMode (so mouse scaling works properly)
     mode->_width = dev_mode->dmPelsWidth;
     mode->_height = dev_mode->dmPelsHeight;
-
     return true;
-}
-
-bool DesktopLayout::update_monitor_config(LPCTSTR dev_name, DisplayMode* mode)
-{
-    QXLHead monitor_config;
-
-    if (!mode || !mode->get_attached())
-        return false;
-
-    //Don't configure monitors unless the client supports it
-    if(!_send_monitors_position) return FALSE;
-
-    HDC hdc = CreateDC(dev_name, NULL, NULL, NULL);
-
-    memset(&monitor_config, 0, sizeof(monitor_config));
-    monitor_config.x = mode->_pos_x;
-    monitor_config.y = mode->_pos_y;
-    monitor_config.width = mode->_width;
-    monitor_config.height = mode->_height;
-
-    int err = ExtEscape(hdc, QXL_ESCAPE_MONITOR_CONFIG,
-        sizeof(QXLHead), (LPCSTR) &monitor_config, 0, NULL);
-
-    if (err < 0){
-        vd_printf("can't update monitor config, may have an older driver");
-    }
-
-    DeleteDC(hdc);
-    return (err >= 0);
 }

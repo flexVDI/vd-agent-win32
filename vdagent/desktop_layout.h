@@ -34,12 +34,12 @@ public:
         _primary = (pos_x == 0 && pos_y == 0 && attached);
     }
 
-    LONG get_pos_x() { return _pos_x;}
-    LONG get_pos_y() { return _pos_y;}
-    DWORD get_width() { return _width;}
-    DWORD get_height() { return _height;}
-    DWORD get_depth() { return _depth;}
-    bool get_attached() { return _attached;}
+    LONG get_pos_x() const { return _pos_x;}
+    LONG get_pos_y() const { return _pos_y;}
+    DWORD get_width() const { return _width;}
+    DWORD get_height() const { return _height;}
+    DWORD get_depth() const { return _depth;}
+    bool get_attached() const { return _attached;}
     void set_pos(LONG x, LONG y) { _pos_x = x; _pos_y = y;}
     void move_pos(LONG x, LONG y) { _pos_x += x; _pos_y += y;}
     void set_res(DWORD width, DWORD height, DWORD depth);
@@ -60,6 +60,7 @@ private:
 };
 
 typedef std::vector<DisplayMode*> Displays;
+class DisplayConfig;
 
 class DesktopLayout {
 public:
@@ -67,29 +68,27 @@ public:
     ~DesktopLayout();
     void get_displays();
     void set_displays();
-    void lock() { MUTEX_LOCK(_mutex);}
-    void unlock() { MUTEX_UNLOCK(_mutex);}
+    void lock() { _mutex.lock(); }
+    void unlock() { _mutex.unlock(); }
     DisplayMode* get_display(int i) { return _displays.at(i);}
     size_t get_display_count() { return _displays.size();}
     DWORD get_total_width() { return _total_width;}
     DWORD get_total_height() { return _total_height;}
-    void set_position_configurable(bool flag) { _send_monitors_position = flag; }
+    void set_position_configurable(bool flag);
 private:
     void clean_displays();
     void normalize_displays_pos();
     DisplayMode * get_primary_display();
-    bool update_monitor_config(LPCTSTR dev_name, DisplayMode* mode);
+    bool init_dev_mode(LPCTSTR dev_name, DEVMODE* dev_mode, DisplayMode* mode);
     static bool consistent_displays();
     static bool is_attached(LPCTSTR dev_name);
     static bool get_qxl_device_id(WCHAR* device_key, DWORD* device_id);
-    static bool init_dev_mode(LPCTSTR dev_name, DEVMODE* dev_mode, DisplayMode* mode,
-                              LONG normal_x, LONG normal_y, bool set_pos);
 private:
     mutex_t _mutex;
     Displays _displays;
     DWORD _total_width;
     DWORD _total_height;
-    bool _send_monitors_position;
+    DisplayConfig* _display_config;
 };
 
 #endif

@@ -27,11 +27,42 @@
 #include "spice/vd_agent.h"
 #include "vdlog.h"
 
-typedef CRITICAL_SECTION mutex_t;
+class Mutex {
+public:
+    Mutex() {
+        InitializeCriticalSection(&_crit);
+    }
+    ~Mutex() {
+        DeleteCriticalSection(&_crit);
+    }
+    void lock() {
+        EnterCriticalSection(&_crit);
+    }
+    void unlock() {
+        LeaveCriticalSection(&_crit);
+    }
+private:
+    CRITICAL_SECTION _crit;
+    // no copy
+    Mutex(const Mutex&);
+    void operator=(const Mutex&);
+};
 
-#define MUTEX_INIT(mutex) InitializeCriticalSection(&mutex)
-#define MUTEX_LOCK(mutex) EnterCriticalSection(&mutex)
-#define MUTEX_UNLOCK(mutex) LeaveCriticalSection(&mutex)
+class MutexLocker {
+public:
+    MutexLocker(Mutex &mtx):_mtx(mtx) {
+        _mtx.lock();
+    }
+    ~MutexLocker() {
+        _mtx.unlock();
+    }
+private:
+    Mutex &_mtx;
+    // no copy
+    MutexLocker(const MutexLocker&);
+    void operator=(const MutexLocker&);
+};
+typedef Mutex mutex_t;
 
 #define VD_AGENT_REGISTRY_KEY "SOFTWARE\\Red Hat\\Spice\\vdagent\\"
 #define VD_AGENT_STOP_EVENT   TEXT("Global\\vdagent_stop_event")
@@ -62,8 +93,6 @@ typedef CRITICAL_SECTION mutex_t;
  * those functions are not required to be in that dll on the guest.
  */
 #ifdef OLDMSVCRT
-#define swprintf_s(buf, sz, format...) swprintf(buf, format)
-
 #ifndef _ftime_s
 #define _ftime_s(timeb) _ftime(timeb)
 #endif
@@ -72,6 +101,7 @@ typedef CRITICAL_SECTION mutex_t;
 #ifdef _MSC_VER // compiling with Visual Studio
 #define HAVE_STRCAT_S 1
 #define HAVE_STRCPY_S 1
+#define HAVE_SWPRINTF_S 1
 #endif
 
 #ifdef HAVE_STRCAT_S
@@ -90,6 +120,11 @@ errno_t vdagent_strcpy_s(char *strDestination,
                          const char *strSource);
 #endif
 
+#ifndef HAVE_SWPRINTF_S
+int vdagent_swprintf_s(wchar_t *buf, size_t len, const wchar_t *format, ...);
+#define swprintf_s vdagent_swprintf_s
+#endif
+
 #ifdef _MSC_VER // compiling with Visual Studio
 #define snprintf         sprintf_s
 #define sscanf           sscanf_s
@@ -101,7 +136,7 @@ enum SystemVersion {
     SYS_VER_WIN_7_CLASS,  // also Windows 8, Server 2012, Server 2008/R2 & Vista
 };
 
-int supported_system_version();
+SystemVersion supported_system_version();
 
 #endif
 

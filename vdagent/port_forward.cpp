@@ -24,16 +24,6 @@ static const char* getErrorMessage(DWORD error)
 #endif
 }
 
-struct ScopedLock {
-    mutex_t &mutex;
-    ScopedLock(mutex_t &m) : mutex(m) {
-        MUTEX_LOCK(mutex);
-    }
-    ~ScopedLock() {
-        MUTEX_UNLOCK(mutex);
-    }
-};
-
 struct Buffer {
     uint8_t *buff;
     size_t size, pos;
@@ -331,14 +321,13 @@ PortForwarder::PortForwarder(Sender& s)
     WSAStartup(MAKEWORD(2, 2), &WsaDat);
     iocp = ::CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 0);
     iocpThread = ::CreateThread(NULL, 0, ThreadProc, this, 0, NULL);
-    MUTEX_INIT(mutex);
 }
 
 PortForwarder::~PortForwarder()
 {
     LOG(LOG_INFO, "Client disconnected, removing port redirections");
     {
-        ScopedLock lock(mutex);
+        MutexLocker lock(mutex);
         has_client = false;
         connections.clear();
         acceptors.clear();
@@ -366,7 +355,7 @@ void PortForwarder::handle_io_events()
                     getErrorMessage(WSAGetLastError()));
             } else {
                 LOG(LOG_DEBUG, "IO operation %p finished", operation);
-                ScopedLock lock(mutex);
+                MutexLocker lock(mutex);
                 operation->handle_to(*this, bytes);
             }
             delete operation;
@@ -646,7 +635,7 @@ bool PortForwarder::dispatch(uint32_t command, void* data)
 {
     LOG(LOG_DEBUG, "Receiving command %d", (int)command);
     has_client = true;
-    ScopedLock lock(mutex);
+    MutexLocker lock(mutex);
     switch (command) {
         case VD_AGENT_PORT_FORWARD_LISTEN:
             listen_to(*(VDAgentPortForwardListenMessage *)data);

@@ -23,10 +23,12 @@
 #include "port_forward.h"
 #undef max
 #undef min
+#include <spice/macros.h>
 #include <wtsapi32.h>
 #include <lmcons.h>
 #include <queue>
 #include <set>
+#include <vector>
 
 #define VD_AGENT_LOG_PATH       TEXT("%svdagent.log")
 #define VD_AGENT_WINCLASS_NAME  TEXT("VDAGENT")
@@ -46,20 +48,20 @@ typedef struct VDClipboardFormat {
     uint32_t types[VD_CLIPBOARD_FORMAT_MAX_TYPES];
 } VDClipboardFormat;
 
-VDClipboardFormat clipboard_formats[] = {
+static const VDClipboardFormat clipboard_formats[] = {
     {CF_UNICODETEXT, {VD_AGENT_CLIPBOARD_UTF8_TEXT, 0}},
     //FIXME: support more image types
     {CF_DIB, {VD_AGENT_CLIPBOARD_IMAGE_PNG, VD_AGENT_CLIPBOARD_IMAGE_BMP, 0}},
 };
 
-#define clipboard_formats_count (sizeof(clipboard_formats) / sizeof(clipboard_formats[0]))
+#define clipboard_formats_count SPICE_N_ELEMENTS(clipboard_formats)
 
 typedef struct ImageType {
     uint32_t type;
     DWORD cximage_format;
 } ImageType;
 
-static ImageType image_types[] = {
+static const ImageType image_types[] = {
     {VD_AGENT_CLIPBOARD_IMAGE_PNG, CXIMAGE_FORMAT_PNG},
     {VD_AGENT_CLIPBOARD_IMAGE_BMP, CXIMAGE_FORMAT_BMP},
 };
@@ -108,12 +110,12 @@ private:
     static VOID CALLBACK read_completion(DWORD err, DWORD bytes, LPOVERLAPPED overlapped);
     static VOID CALLBACK write_completion(DWORD err, DWORD bytes, LPOVERLAPPED overlapped);
     void dispatch_message(VDAgentMessage* msg, uint32_t port);
-    uint32_t get_clipboard_format(uint32_t type);
-    uint32_t get_clipboard_type(uint32_t format);
-    DWORD get_cximage_format(uint32_t type);
+    uint32_t get_clipboard_format(uint32_t type) const;
+    uint32_t get_clipboard_type(uint32_t format) const;
+    DWORD get_cximage_format(uint32_t type) const;
     enum { owner_none, owner_guest, owner_client };
     void set_clipboard_owner(int new_owner);
-    enum { CONTROL_STOP, CONTROL_DESKTOP_SWITCH, CONTROL_LOGON, CONTROL_CLIPBOARD, CONTROL_DATA };
+    enum { CONTROL_STOP, CONTROL_RESET, CONTROL_DESKTOP_SWITCH, CONTROL_LOGON, CONTROL_CLIPBOARD, CONTROL_DATA };
     void set_control_event(int control_command);
     void handle_control_event();
     VDIChunk* new_chunk(DWORD bytes = 0);
@@ -127,6 +129,10 @@ private:
     bool send_announce_capabilities(bool request);
     void cleanup_in_msg();
     void cleanup();
+    bool has_capability(unsigned int capability) const {
+        return VD_AGENT_HAS_CAPABILITY(_client_caps.begin(), _client_caps.size(),
+                                       capability);
+    }
 
 private:
     static VDAgent* _singleton;
@@ -149,6 +155,7 @@ private:
     uint32_t _in_msg_pos;
     bool _pending_input;
     bool _running;
+    bool _session_is_locked;
     bool _desktop_switch;
     DesktopLayout* _desktop_layout;
     bool _updating_display_config;
@@ -170,8 +177,7 @@ private:
     bool _logon_occured;
 
     int32_t _max_clipboard;
-    uint32_t *_client_caps;
-    uint32_t _client_caps_size;
+    std::vector<uint32_t> _client_caps;
 
     std::set<uint32_t> _grab_types;
 
@@ -187,9 +193,6 @@ VDAgent* VDAgent::_singleton = NULL;
 struct VDAgentSendPFCommand : public PortForwarder::Sender {
     std::list<VDIChunk *> commands;
     mutex_t mutex;
-    VDAgentSendPFCommand() {
-        MUTEX_INIT(mutex);
-    }
     ~VDAgentSendPFCommand() {}
     void *get_buffer(size_t size) {
         uint8_t* buffer = new uint8_t[VD_MESSAGE_HEADER_SIZE + size];
@@ -207,20 +210,18 @@ struct VDAgentSendPFCommand : public PortForwarder::Sender {
             msg->type = type;
             msg->opaque = 0;
             msg->size = size;
-            MUTEX_LOCK(mutex);
+            MutexLocker lock(mutex);
             commands.push_back(msg_chunk);
-            MUTEX_UNLOCK(mutex);
             VDAgent::_singleton->set_control_event(VDAgent::CONTROL_DATA);
         } else delete[] buffer;
     }
     VDIChunk *get_chunk() {
         VDIChunk *result = NULL;
-        MUTEX_LOCK(mutex);
+        MutexLocker lock(mutex);
         if (!commands.empty()) {
             result = commands.front();
             commands.pop_front();
         }
-        MUTEX_UNLOCK(mutex);
         return result;
     }
 };
@@ -253,6 +254,7 @@ VDAgent::VDAgent()
     , _in_msg_pos (0)
     , _pending_input (false)
     , _running (false)
+    , _session_is_locked (false)
     , _desktop_switch (false)
     , _desktop_layout (NULL)
     , _display_setting (VD_AGENT_REGISTRY_KEY)
@@ -262,8 +264,6 @@ VDAgent::VDAgent()
     , _logon_desktop (false)
     , _display_setting_initialized (false)
     , _max_clipboard (-1)
-    , _client_caps (NULL)
-    , _client_caps_size (0)
     , _pf(NULL)
     , _send_command(NULL)
     , _log (NULL)
@@ -280,8 +280,6 @@ VDAgent::VDAgent()
     ZeroMemory(&_read_overlapped, sizeof(_read_overlapped));
     ZeroMemory(&_write_overlapped, sizeof(_write_overlapped));
     ZeroMemory(_read_buf, sizeof(_read_buf));
-    MUTEX_INIT(_control_mutex);
-    MUTEX_INIT(_message_mutex);
     _send_command = new VDAgentSendPFCommand();
 
     _singleton = this;
@@ -290,21 +288,21 @@ VDAgent::VDAgent()
 VDAgent::~VDAgent()
 {
     delete _log;
-    delete[] _client_caps;
 }
 
 DWORD WINAPI VDAgent::event_thread_proc(LPVOID param)
 {
+    VDAgent *agent = static_cast<VDAgent *>(param);
     HANDLE desktop_event = OpenEvent(SYNCHRONIZE, FALSE, L"WinSta0_DesktopSwitch");
     if (!desktop_event) {
         vd_printf("OpenEvent() failed: %lu", GetLastError());
         return 1;
     }
-    while (_singleton->_running) {
+    while (agent->_running) {
         DWORD wait_ret = WaitForSingleObject(desktop_event, INFINITE);
         switch (wait_ret) {
         case WAIT_OBJECT_0:
-            _singleton->set_control_event(CONTROL_DESKTOP_SWITCH);
+            agent->set_control_event(CONTROL_DESKTOP_SWITCH);
             break;
         case WAIT_TIMEOUT:
         default:
@@ -380,7 +378,7 @@ bool VDAgent::run()
         return false;
     }
     _running = true;
-    event_thread = CreateThread(NULL, 0, event_thread_proc, NULL, 0, &event_thread_id);
+    event_thread = CreateThread(NULL, 0, event_thread_proc, this, 0, &event_thread_id);
     if (!event_thread) {
         vd_printf("CreateThread() failed: %lu", GetLastError());
         cleanup();
@@ -415,22 +413,26 @@ void VDAgent::cleanup()
 
 void VDAgent::set_control_event(int control_command)
 {
-    MUTEX_LOCK(_control_mutex);
+    MutexLocker lock(_control_mutex);
     _control_queue.push(control_command);
     if (_control_event && !SetEvent(_control_event)) {
         vd_printf("SetEvent() failed: %lu", GetLastError());
     }
-    MUTEX_UNLOCK(_control_mutex);
 }
 
 void VDAgent::handle_control_event()
 {
-    MUTEX_LOCK(_control_mutex);
+    MutexLocker lock(_control_mutex);
     while (_control_queue.size()) {
         int control_command = _control_queue.front();
         _control_queue.pop();
         vd_printf("Control command %d", control_command);
         switch (control_command) {
+        case CONTROL_RESET:
+            _file_xfer.reset();
+            set_control_event(CONTROL_CLIPBOARD);
+            set_clipboard_owner(owner_none);
+            break;
         case CONTROL_STOP:
             _running = false;
             break;
@@ -458,7 +460,6 @@ void VDAgent::handle_control_event()
             vd_printf("Unsupported control command %u", control_command);
         }
     }
-    MUTEX_UNLOCK(_control_mutex);
 }
 
 void VDAgent::input_desktop_message_loop()
@@ -535,10 +536,22 @@ void VDAgent::input_desktop_message_loop()
 
 void VDAgent::event_dispatcher(DWORD timeout, DWORD wake_mask)
 {
-    HANDLE events[] = {_control_event, _stop_event};
-    DWORD event_count = _stop_event ? 2 : 1;
+    HANDLE events[2];
+    DWORD event_count = 1;
     DWORD wait_ret;
     MSG msg;
+    enum {
+        CONTROL_ACTION,
+        STOP_ACTION,
+    } actions[SPICE_N_ELEMENTS(events)], action;
+
+    events[0] = _control_event;
+    actions[0] = CONTROL_ACTION;
+    if (_stop_event) {
+        events[event_count] = _stop_event;
+        actions[event_count] = STOP_ACTION;
+        event_count++;
+    }
 
     wait_ret = MsgWaitForMultipleObjectsEx(event_count, events, timeout, wake_mask, MWMO_ALERTABLE);
     if (wait_ret == WAIT_OBJECT_0 + event_count) {
@@ -547,19 +560,25 @@ void VDAgent::event_dispatcher(DWORD timeout, DWORD wake_mask)
             DispatchMessage(&msg);
         }
         return;
+    } else if (wait_ret == WAIT_IO_COMPLETION || wait_ret == WAIT_TIMEOUT) {
+        return;
+    } else if (wait_ret < WAIT_OBJECT_0 || wait_ret > WAIT_OBJECT_0 + event_count) {
+        vd_printf("MsgWaitForMultipleObjectsEx failed: %lu %lu", wait_ret, GetLastError());
+        _running = false;
+        return;
     }
-    switch (wait_ret) {
-    case WAIT_OBJECT_0:
+
+    action = actions[wait_ret - WAIT_OBJECT_0];
+    switch (action) {
+    case CONTROL_ACTION:
         handle_control_event();
         break;
-    case WAIT_OBJECT_0 + 1:
+    case STOP_ACTION:
+        vd_printf("%s: received stop event", __func__);
         _running = false;
         break;
-    case WAIT_IO_COMPLETION:
-    case WAIT_TIMEOUT:
-        break;
     default:
-        vd_printf("MsgWaitForMultipleObjectsEx failed: %lu %lu", wait_ret, GetLastError());
+        vd_printf("%s: action not handled (%d)", __func__, action);
         _running = false;
     }
 }
@@ -624,13 +643,15 @@ bool VDAgent::handle_mouse_event(VDAgentMouseState* state)
     ZeroMemory(&_input, sizeof(INPUT));
     _input.type = INPUT_MOUSE;
     if (state->x != _mouse_x || state->y != _mouse_y) {
+        DWORD w = _desktop_layout->get_total_width();
+        DWORD h = _desktop_layout->get_total_height();
+        w = (w > 1) ? w-1 : 1; /* coordinates are 0..w-1, protect w==0 */
+        h = (h > 1) ? h-1 : 1; /* coordinates are 0..h-1, protect h==0 */
         _mouse_x = state->x;
         _mouse_y = state->y;
         mouse_move = MOUSEEVENTF_MOVE;
-        _input.mi.dx = (mode->get_pos_x() + _mouse_x) * 0xffff /
-                       _desktop_layout->get_total_width();
-        _input.mi.dy = (mode->get_pos_y() + _mouse_y) * 0xffff /
-                       _desktop_layout->get_total_height();
+        _input.mi.dx = (mode->get_pos_x() + _mouse_x) * 0xffff / w;
+        _input.mi.dy = (mode->get_pos_y() + _mouse_y) * 0xffff / h;
     }
     if (state->buttons != _buttons_state) {
         buttons_change = get_buttons_change(_buttons_state, state->buttons, VD_AGENT_LBUTTON_MASK,
@@ -673,13 +694,13 @@ bool VDAgent::handle_mouse_event(VDAgentMouseState* state)
 
 bool VDAgent::handle_mon_config(VDAgentMonitorsConfig* mon_config, uint32_t port)
 {
-    VDAgent* a = _singleton;
     VDIChunk* reply_chunk;
     VDAgentMessage* reply_msg;
     VDAgentReply* reply;
     size_t display_count;
+    bool update_displays(false);
 
-    a->_updating_display_config = true;
+    _updating_display_config = true;
 
     display_count = _desktop_layout->get_display_count();
     for (uint32_t i = 0; i < display_count; i++) {
@@ -690,6 +711,7 @@ bool VDAgent::handle_mon_config(VDAgentMonitorsConfig* mon_config, uint32_t port
         if (i >= mon_config->num_of_monitors) {
             vd_printf("%d. detached", i);
             mode->set_attached(false);
+            update_displays = true;
             continue;
         }
         VDAgentMonConfig* mon = &mon_config->monitors[i];
@@ -697,22 +719,30 @@ bool VDAgent::handle_mon_config(VDAgentMonitorsConfig* mon_config, uint32_t port
                   mon->y, !!(mon_config->flags & VD_AGENT_CONFIG_MONITORS_FLAG_USE_POS));
         if (mon->height == 0 && mon->depth == 0) {
             vd_printf("%d. detaching", i);
+            update_displays = mode->get_attached() ? true : update_displays;
             mode->set_attached(false);
             continue;
         }
-        mode->set_res(mon->width, mon->height, mon->depth);
-        if (mon_config->flags & VD_AGENT_CONFIG_MONITORS_FLAG_USE_POS) {
-            mode->set_pos(mon->x, mon->y);
+        if (mode->get_height() != mon->height || mode->get_width() != mon->width || mode->get_depth() != mon->depth) {
+            mode->set_res(mon->width, mon->height, mon->depth);
+            update_displays = true;
         }
-        mode->set_attached(true);
+        if (mon_config->flags & VD_AGENT_CONFIG_MONITORS_FLAG_USE_POS && (mode->get_pos_x() != mon->x || mode->get_pos_y() != mon->y)) {
+            mode->set_pos(mon->x, mon->y);
+            update_displays = true;
+        }
+        if (!mode->get_attached()) {
+            mode->set_attached(true);
+            update_displays = true;
+        }
     }
-    if (display_count) {
+    if (update_displays) {
         _desktop_layout->set_displays();
     }
 
-    a->_updating_display_config = false;
+    _updating_display_config = false;
     /* refresh again, in case something else changed */
-    a->_desktop_layout->get_displays();
+    _desktop_layout->get_displays();
 
     DWORD msg_size = VD_MESSAGE_HEADER_SIZE + sizeof(VDAgentReply);
     reply_chunk = new_chunk(msg_size);
@@ -886,16 +916,9 @@ bool VDAgent::handle_announce_capabilities(VDAgentAnnounceCapabilities* announce
     for (uint32_t i = 0 ; i < caps_size; ++i) {
         vd_printf("%X", announce_capabilities->caps[i]);
     }
-    if (caps_size != _client_caps_size) {
-        delete[] _client_caps;
-        _client_caps = new uint32_t[caps_size];
-        ASSERT(_client_caps != NULL);
-        _client_caps_size = caps_size;
-    }
-    memcpy(_client_caps, announce_capabilities->caps, sizeof(_client_caps[0]) * caps_size);
+    _client_caps.assign(announce_capabilities->caps, announce_capabilities->caps + caps_size);
 
-    if (VD_AGENT_HAS_CAPABILITY(_client_caps, _client_caps_size,
-                                VD_AGENT_CAP_MONITORS_CONFIG_POSITION))
+    if (has_capability(VD_AGENT_CAP_MONITORS_CONFIG_POSITION))
         _desktop_layout->set_position_configurable(true);
     if (announce_capabilities->request) {
         return send_announce_capabilities(false);
@@ -960,8 +983,6 @@ bool VDAgent::handle_max_clipboard(VDAgentMaxClipboard *msg, uint32_t size)
     return true;
 }
 
-#define MIN(a, b) ((a) > (b) ? (b) : (a))
-
 bool VDAgent::write_clipboard(VDAgentMessage* msg, uint32_t size)
 {
     uint32_t pos = 0;
@@ -969,7 +990,7 @@ bool VDAgent::write_clipboard(VDAgentMessage* msg, uint32_t size)
 
     ASSERT(msg && size);
     //FIXME: do it smarter - no loop, no memcopy
-    MUTEX_LOCK(_message_mutex);
+    MutexLocker lock(_message_mutex);
     while (pos < size) {
         DWORD n = MIN(sizeof(VDIChunk) + size - pos, VD_AGENT_MAX_DATA_SIZE);
         VDIChunk* chunk = new_chunk(n);
@@ -983,7 +1004,6 @@ bool VDAgent::write_clipboard(VDAgentMessage* msg, uint32_t size)
         enqueue_chunk(chunk);
         pos += (n - sizeof(VDIChunk));
     }
-    MUTEX_UNLOCK(_message_mutex);
     return ret;
 }
 
@@ -1015,8 +1035,7 @@ void VDAgent::on_clipboard_grab()
     uint32_t types[clipboard_formats_count * VD_CLIPBOARD_FORMAT_MAX_TYPES];
     int count = 0;
 
-    if (!VD_AGENT_HAS_CAPABILITY(_client_caps, _client_caps_size,
-                                 VD_AGENT_CAP_CLIPBOARD_BY_DEMAND)) {
+    if (!has_capability(VD_AGENT_CAP_CLIPBOARD_BY_DEMAND)) {
         return;
     }
     if (CountClipboardFormats() == 0) {
@@ -1024,7 +1043,7 @@ void VDAgent::on_clipboard_grab()
     }
     for (unsigned int i = 0; i < clipboard_formats_count; i++) {
         if (IsClipboardFormatAvailable(clipboard_formats[i].format)) {
-            for (uint32_t* ptype = clipboard_formats[i].types; *ptype; ptype++) {
+            for (const uint32_t* ptype = clipboard_formats[i].types; *ptype; ptype++) {
                 types[count++] = *ptype;
             }
         }
@@ -1060,8 +1079,7 @@ void VDAgent::on_clipboard_request(UINT format)
         vd_printf("Unsupported clipboard format %u", format);
         return;
     }
-    if (!VD_AGENT_HAS_CAPABILITY(_client_caps, _client_caps_size,
-                                 VD_AGENT_CAP_CLIPBOARD_BY_DEMAND)) {
+    if (!has_capability(VD_AGENT_CAP_CLIPBOARD_BY_DEMAND)) {
         return;
     }
 
@@ -1087,8 +1105,7 @@ void VDAgent::on_clipboard_request(UINT format)
 
 void VDAgent::on_clipboard_release()
 {
-    if (!VD_AGENT_HAS_CAPABILITY(_client_caps, _client_caps_size,
-                                 VD_AGENT_CAP_CLIPBOARD_BY_DEMAND)) {
+    if (!has_capability(VD_AGENT_CAP_CLIPBOARD_BY_DEMAND)) {
         return;
     }
     if (_clipboard_owner == owner_guest) {
@@ -1245,10 +1262,10 @@ void VDAgent::handle_clipboard_release()
     set_clipboard_owner(owner_none);
 }
 
-uint32_t VDAgent::get_clipboard_format(uint32_t type)
+uint32_t VDAgent::get_clipboard_format(uint32_t type) const
 {
     for (unsigned int i = 0; i < clipboard_formats_count; i++) {
-        for (uint32_t* ptype = clipboard_formats[i].types; *ptype; ptype++) {
+        for (const uint32_t* ptype = clipboard_formats[i].types; *ptype; ptype++) {
             if (*ptype == type) {
                 return clipboard_formats[i].format;
             }
@@ -1257,9 +1274,9 @@ uint32_t VDAgent::get_clipboard_format(uint32_t type)
     return 0;
 }
 
-uint32_t VDAgent::get_clipboard_type(uint32_t format)
+uint32_t VDAgent::get_clipboard_type(uint32_t format) const
 {
-    uint32_t* types = NULL;
+    const uint32_t* types = NULL;
 
     for (unsigned int i = 0; i < clipboard_formats_count && !types; i++) {
         if (clipboard_formats[i].format == format) {
@@ -1269,7 +1286,7 @@ uint32_t VDAgent::get_clipboard_type(uint32_t format)
     if (!types) {
         return 0;
     }
-    for (uint32_t* ptype = types; *ptype; ptype++) {
+    for (const uint32_t* ptype = types; *ptype; ptype++) {
         if (_grab_types.find(*ptype) != _grab_types.end()) {
             return *ptype;
         }
@@ -1277,9 +1294,9 @@ uint32_t VDAgent::get_clipboard_type(uint32_t format)
     return 0;
 }
 
-DWORD VDAgent::get_cximage_format(uint32_t type)
+DWORD VDAgent::get_cximage_format(uint32_t type) const
 {
-    for (unsigned int i = 0; i < sizeof(image_types) / sizeof(image_types[0]); i++) {
+    for (unsigned int i = 0; i < SPICE_N_ELEMENTS(image_types); i++) {
         if (image_types[i].type == type) {
             return image_types[i].cximage_format;
         }
@@ -1340,7 +1357,19 @@ void VDAgent::dispatch_message(VDAgentMessage* msg, uint32_t port)
     case VD_AGENT_ANNOUNCE_CAPABILITIES:
         res = handle_announce_capabilities((VDAgentAnnounceCapabilities*)msg->data, msg->size);
         break;
-    case VD_AGENT_FILE_XFER_START:
+    case VD_AGENT_FILE_XFER_START: {
+        VDAgentFileXferStatusMessage status;
+        if (_session_is_locked) {
+            VDAgentFileXferStartMessage *s = (VDAgentFileXferStartMessage *)msg->data;
+            status.id = s->id;
+            status.result = VD_AGENT_FILE_XFER_STATUS_ERROR;
+            vd_printf("Fail to start file-xfer %u due: Locked session", status.id);
+            write_message(VD_AGENT_FILE_XFER_STATUS, sizeof(status), &status);
+        } else if (_file_xfer.dispatch(msg, &status)) {
+            write_message(VD_AGENT_FILE_XFER_STATUS, sizeof(status), &status);
+        }
+        break;
+    }
     case VD_AGENT_FILE_XFER_STATUS:
     case VD_AGENT_FILE_XFER_DATA: {
         VDAgentFileXferStatusMessage status;
@@ -1350,8 +1379,8 @@ void VDAgent::dispatch_message(VDAgentMessage* msg, uint32_t port)
         break;
     }
     case VD_AGENT_CLIENT_DISCONNECTED:
-        vd_printf("Client disconnected, agent to be restarted");
-        set_control_event(CONTROL_STOP);
+        vd_printf("Client disconnected, resetting agent state");
+        set_control_event(CONTROL_RESET);
         break;
     case VD_AGENT_MAX_CLIPBOARD:
         res = handle_max_clipboard((VDAgentMaxClipboard*)msg->data, msg->size);
@@ -1470,7 +1499,7 @@ void VDAgent::write_completion(DWORD err, DWORD bytes, LPOVERLAPPED overlapped)
         a->_running = false;
         return;
     }
-    MUTEX_LOCK(a->_message_mutex);
+    MutexLocker lock(a->_message_mutex);
     a->_write_pos += bytes;
     chunk = a->_message_queue.front();
     count = sizeof(VDIChunk) + chunk->hdr.size - a->_write_pos;
@@ -1490,7 +1519,6 @@ void VDAgent::write_completion(DWORD err, DWORD bytes, LPOVERLAPPED overlapped)
             a->_running = false;
         }
     }
-    MUTEX_UNLOCK(a->_message_mutex);
 }
 
 VDIChunk* VDAgent::new_chunk(DWORD bytes)
@@ -1500,12 +1528,11 @@ VDIChunk* VDAgent::new_chunk(DWORD bytes)
 
 void VDAgent::enqueue_chunk(VDIChunk* chunk)
 {
-    MUTEX_LOCK(_message_mutex);
+    MutexLocker lock(_message_mutex);
     _message_queue.push(chunk);
     if (_message_queue.size() == 1) {
         write_completion(0, 0, &_write_overlapped);
     }
-    MUTEX_UNLOCK(_message_mutex);
 }
 
 LRESULT CALLBACK VDAgent::wnd_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
@@ -1555,6 +1582,10 @@ LRESULT CALLBACK VDAgent::wnd_proc(HWND hwnd, UINT message, WPARAM wparam, LPARA
     case WM_WTSSESSION_CHANGE:
         if (wparam == WTS_SESSION_LOGON) {
             a->set_control_event(CONTROL_LOGON);
+        } else if (wparam == WTS_SESSION_LOCK) {
+            a->_session_is_locked = true;
+        } else if (wparam == WTS_SESSION_UNLOCK) {
+            a->_session_is_locked = false;
         }
         break;
     default:

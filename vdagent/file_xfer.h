@@ -34,6 +34,8 @@ typedef struct ALIGN_VC FileXferTask {
     uint64_t size;
     uint64_t pos;
     TCHAR name[MAX_PATH];
+
+    void cancel();
 } ALIGN_GCC FileXferTask;
 
 typedef std::map<uint32_t, FileXferTask*> FileXferTasks;
@@ -42,6 +44,7 @@ class FileXfer {
 public:
     ~FileXfer();
     bool dispatch(VDAgentMessage* msg, VDAgentFileXferStatusMessage* status);
+    void reset();
 
 private:
     void handle_start(VDAgentFileXferStartMessage* start, VDAgentFileXferStatusMessage* status);

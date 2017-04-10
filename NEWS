@@ -1,3 +1,11 @@
+v0.8.0
+======
+- add multi monitor/dynamic resolution support on Win8+
+  when the qxl-wddm-dod driver is used
+- disable drag and drop when the screen is locked
+- dynamic resolution/monitor positioning improvements
+- improve handling of Unicode filenames during drag and drop
+
 v0.7.3
 ======
 - file-xfer: make user desktop the target directory
