@@ -28,6 +28,8 @@
 #endif // compiler specific definitions
 
 #include <stdio.h>
+#include <spice/macros.h>
+
 #include "file_xfer.h"
 #include "as_user.h"
 
@@ -99,13 +101,40 @@ void FileXfer::handle_start(VDAgentFileXferStartMessage* start,
 
     file_path[wlen++] = TEXT('\\');
     file_path[wlen] = TEXT('\0');
-    if((wlen = MultiByteToWideChar(CP_UTF8, 0, file_name, -1, file_path + wlen, MAX_PATH - wlen)) == 0){
-        vd_printf("failed converting file_name:%s to WideChar", file_name);
-        return;
+
+    const int MAX_ATTEMPTS = 64; // matches behavior of linux vdagent
+    const size_t POSTFIX_LEN = 6; // up to 2 digits in parentheses and final NULL: " (xx)"
+    char *extension = strrchr(file_name, '.');
+    if (!extension)
+        extension = strchr(file_name, 0);
+
+    for (int attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+        char dest_filename[SPICE_N_ELEMENTS(file_name) + POSTFIX_LEN];
+        if (attempt == 0) {
+            strcpy(dest_filename, file_name);
+        } else {
+            sprintf(dest_filename, "%.*s (%d)%s", int(extension - file_name), file_name,
+                    attempt, extension);
+        }
+        if ((MultiByteToWideChar(CP_UTF8, 0, dest_filename, -1, file_path + wlen, MAX_PATH - wlen)) == 0) {
+            vd_printf("failed converting file_name:%s to WideChar", dest_filename);
+            return;
+        }
+        handle = CreateFile(file_path, GENERIC_WRITE, 0, NULL, CREATE_NEW, 0, NULL);
+        if (handle != INVALID_HANDLE_VALUE) {
+            break;
+        }
+
+        // If the file already exists, we can re-try with a new filename. If
+        // it's a different error, there's not much we can do.
+        if (GetLastError() != ERROR_FILE_EXISTS) {
+            vd_printf("Failed creating %ls %lu", file_path, GetLastError());
+            return;
+        }
     }
-    handle = CreateFile(file_path, GENERIC_WRITE, 0, NULL, CREATE_NEW, 0, NULL);
+
     if (handle == INVALID_HANDLE_VALUE) {
-        vd_printf("failed creating %ls %lu", file_path, GetLastError());
+        vd_printf("Failed creating %ls. More than 63 copies exist?", file_path);
         return;
     }
     task = new FileXferTask(handle, file_size, file_path);
