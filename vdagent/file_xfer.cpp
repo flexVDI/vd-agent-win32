@@ -113,8 +113,8 @@ void FileXfer::handle_start(VDAgentFileXferStartMessage* start,
         if (attempt == 0) {
             strcpy(dest_filename, file_name);
         } else {
-            sprintf(dest_filename, "%.*s (%d)%s", int(extension - file_name), file_name,
-                    attempt, extension);
+            sprintf_s(dest_filename, SPICE_N_ELEMENTS(dest_filename),
+                      "%.*s (%d)%s", int(extension - file_name), file_name, attempt, extension);
         }
         if ((MultiByteToWideChar(CP_UTF8, 0, dest_filename, -1, file_path + wlen, MAX_PATH - wlen)) == 0) {
             vd_printf("failed converting file_name:%s to WideChar", dest_filename);
