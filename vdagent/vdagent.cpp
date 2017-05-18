@@ -423,6 +423,7 @@ void VDAgent::input_desktop_message_loop()
     }
     if (!SetThreadDesktop(hdesk)) {
         vd_printf("SetThreadDesktop failed %lu", GetLastError());
+        CloseDesktop(hdesk);
         _running = false;
         return;
     }
@@ -431,6 +432,7 @@ void VDAgent::input_desktop_message_loop()
     } else {
         vd_printf("GetUserObjectInformation failed %lu", GetLastError());
     }
+    CloseDesktop(hdesk);
 
     // loading the display settings for the current session's logged on user only
     // after 1) we receive logon event, and 2) the desktop switched from Winlogon
@@ -479,7 +481,6 @@ void VDAgent::input_desktop_message_loop()
     }
     WTSUnRegisterSessionNotification(_hwnd);
     DestroyWindow(_hwnd);
-    CloseDesktop(hdesk);
 }
 
 void VDAgent::event_dispatcher(DWORD timeout, DWORD wake_mask)
