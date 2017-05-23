@@ -25,6 +25,8 @@ BuildRequires:  mingw32-libtiff-static
 BuildRequires:  mingw64-libtiff-static
 BuildRequires:  mingw32-zlib-static
 BuildRequires:  mingw64-zlib-static
+BuildRequires:  mingw32-winpthreads-static
+BuildRequires:  mingw64-winpthreads-static
 BuildRequires:  pkgconfig
 
 BuildArch:      noarch
