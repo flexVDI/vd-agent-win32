@@ -76,7 +76,7 @@ Features:
 %{mingw_debug_package}
 
 %build
-%mingw_configure
+%mingw_configure --enable-debug
 %mingw_make %{?_smp_mflags} V=1
 
 
