@@ -23,7 +23,7 @@
     <Package InstallerVersion="200" Compressed="yes" Comments="comments"/>
     <Media Id="1" Cabinet="cabinet.cab" EmbedCab="yes"/>
 
-    <Property Id="ARPHELPLINK" Value="http://www.spice-space.org"/>
+    <Property Id="ARPHELPLINK" Value="https://www.spice-space.org"/>
     <Property Id="ARPNOMODIFY" Value="1"/>
     <Property Id="ARPNOREPAIR" Value="1"/>
     <Upgrade Id="$(var.UpgradeCode)">

@@ -8,7 +8,7 @@ Release:        1%{?dist}%{?extra_release}
 Summary:        MinGW Windows SPICE guest agent
 
 License:        GPLv2+
-URL:            http://spice-space.org/
+URL:            https://www.spice-space.org/
 Source0:        vdagent-win-%{version}%{?_version_suffix}.tar.xz
 
 BuildRequires:  mingw32-filesystem >= 23
