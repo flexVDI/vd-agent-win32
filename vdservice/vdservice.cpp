@@ -78,18 +78,18 @@ private:
     bool kill_agent();
     unsigned fill_agent_event() {
         ASSERT(_events);
-        if (_agent_proc_info.hProcess) {
-            _events[_events_count - 1] = _agent_proc_info.hProcess;
+        if (_agent_process) {
+            _events[_events_count - 1] = _agent_process;
             return _events_count;
         } else {
             return _events_count - 1;
         }
     }
-    bool agent_alive() const { return _agent_proc_info.hProcess != NULL; }
+    bool agent_alive() const { return _agent_process != NULL; }
 private:
     SERVICE_STATUS _status;
     SERVICE_STATUS_HANDLE _status_handle;
-    PROCESS_INFORMATION _agent_proc_info;
+    HANDLE _agent_process;
     HANDLE _control_event;
     HANDLE _agent_stop_event;
     HANDLE* _events;
@@ -109,6 +109,7 @@ private:
 
 VDService::VDService()
     : _status_handle (0)
+    , _agent_process(NULL)
     , _events (NULL)
     , _connection_id (0)
     , _session_id (0)
@@ -118,7 +119,6 @@ VDService::VDService()
     , _log (NULL)
     , _events_count(0)
 {
-    ZeroMemory(&_agent_proc_info, sizeof(_agent_proc_info));
     _system_version = supported_system_version();
     _control_event = CreateEvent(NULL, FALSE, FALSE, NULL);
     _agent_stop_event = CreateEvent(NULL, FALSE, FALSE, VD_AGENT_STOP_EVENT);
@@ -695,20 +695,21 @@ bool VDService::launch_agent()
 {
     STARTUPINFO startup_info;
     BOOL ret = FALSE;
+    PROCESS_INFORMATION agent_proc_info = {};
 
     ZeroMemory(&startup_info, sizeof(startup_info));
     startup_info.cb = sizeof(startup_info);
     startup_info.lpDesktop = const_cast<LPTSTR>(TEXT("Winsta0\\winlogon"));
-    ZeroMemory(&_agent_proc_info, sizeof(_agent_proc_info));
+    _agent_process = NULL;
     if (_system_version == SYS_VER_WIN_XP_CLASS) {
         if (_session_id == 0) {
             ret = CreateProcess(_agent_path, _agent_path, NULL, NULL, FALSE, 0, NULL, NULL,
-                                &startup_info, &_agent_proc_info);
+                                &startup_info, &agent_proc_info);
         } else {
             for (int i = 0; i < CREATE_PROC_MAX_RETRIES; i++) {
                 ret = create_session_process_as_user(_session_id, TRUE, NULL, NULL, _agent_path,
                                                      NULL, NULL, FALSE, 0, NULL, NULL,
-                                                     &startup_info, &_agent_proc_info);
+                                                     &startup_info, &agent_proc_info);
                 if (ret) {
                     vd_printf("create_session_process_as_user #%d", i);
                     break;
@@ -719,7 +720,7 @@ bool VDService::launch_agent()
     } else if (_system_version == SYS_VER_WIN_7_CLASS) {
         startup_info.lpDesktop = const_cast<LPTSTR>(TEXT("Winsta0\\default"));
         ret = create_process_as_user(_session_id, _agent_path, _agent_path, NULL, NULL, FALSE, 0,
-                                     NULL, NULL, &startup_info, &_agent_proc_info);
+                                     NULL, NULL, &startup_info, &agent_proc_info);
     } else {
         vd_printf("Not supported in this system version");
         return false;
@@ -728,8 +729,8 @@ bool VDService::launch_agent()
         vd_printf("CreateProcess() failed: %lu", GetLastError());
         return false;
     }
-    CloseHandle(_agent_proc_info.hThread);
-    _agent_proc_info.hThread = NULL;
+    CloseHandle(agent_proc_info.hThread);
+    _agent_process = agent_proc_info.hProcess;
     return true;
 }
 
@@ -743,8 +744,8 @@ bool VDService::kill_agent()
     if (!agent_alive()) {
         return true;
     }
-    proc_handle = _agent_proc_info.hProcess;
-    _agent_proc_info.hProcess = 0;
+    proc_handle = _agent_process;
+    _agent_process = NULL;
     SetEvent(_agent_stop_event);
     if (GetProcessId(proc_handle)) {
         wait_ret = WaitForSingleObject(proc_handle, VD_AGENT_TIMEOUT);
@@ -768,7 +769,6 @@ bool VDService::kill_agent()
     }
     ResetEvent(_agent_stop_event);
     CloseHandle(proc_handle);
-    ZeroMemory(&_agent_proc_info, sizeof(_agent_proc_info));
     return ret;
 }
 
