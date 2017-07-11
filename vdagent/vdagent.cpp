@@ -1067,8 +1067,8 @@ bool VDAgent::handle_clipboard_grab(VDAgentClipboardGrab* clipboard_grab, uint32
 
     _grab_types.clear();
     for (uint32_t i = 0; i < size / sizeof(clipboard_grab->types[0]); i++) {
-        vd_printf("grab type %u", clipboard_grab->types[i]);
         uint32_t format = get_clipboard_format(clipboard_grab->types[i]);
+        vd_printf("grab type %u format=%u", clipboard_grab->types[i], format);
         //On first supported type, open and empty the clipboard
         if (format && grab_formats.empty()) {
             if (!OpenClipboard(_hwnd)) {
