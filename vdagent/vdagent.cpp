@@ -523,11 +523,11 @@ void VDAgent::event_dispatcher(DWORD timeout, DWORD wake_mask)
         handle_control_event();
         break;
     case STOP_ACTION:
-        vd_printf("%s: received stop event", __func__);
+        vd_printf("received stop event");
         _running = false;
         break;
     default:
-        vd_printf("%s: action not handled (%d)", __func__, action);
+        vd_printf("action not handled (%d)", action);
         _running = false;
     }
 }
