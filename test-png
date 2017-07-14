@@ -1,0 +1,58 @@
+#!/bin/bash
+
+VERBOSE=${VERBOSE:-0}
+
+IN=in.png
+OUT=out.png
+OUT_BMP=out.bmp
+
+error() {
+    echo "$*" >&2
+    exit 1
+}
+
+verbose() {
+    if [ $VERBOSE != 0 ]; then
+        "$@"
+    fi
+}
+
+compare_images() {
+    DIFF=$(compare -metric AE $1 $2 - 2>&1 > /dev/null || true)
+    if [ "$DIFF" != "0" ]; then
+        error "Images $1 and $2 are too different, diff $DIFF"
+    fi
+}
+
+do_test() {
+    echo "Running image $IMAGE with '$*'..."
+    convert $IMAGE "$@" $IN
+    wine imagetest.exe $IN $OUT_BMP $OUT
+    verbose ls -lh $IN
+    verbose identify $IN
+    verbose identify $OUT_BMP
+    compare_images $IN $OUT
+    compare_images $IN $OUT_BMP
+    rm -f $IN $OUT $OUT_BMP
+}
+
+do_test_all() {
+    IMAGE="$1"
+    do_test
+    do_test -type Palette
+    do_test -type Palette -colors 14
+    do_test -type Palette -colors 3
+    do_test -type TrueColor
+    do_test -type Grayscale -depth 8
+    do_test -type Grayscale -depth 2
+    do_test -type Grayscale -depth 4
+}
+
+set -e
+# test with small image
+do_test_all rose:
+# test with larger image
+do_test_all logo:
+rm -f $IN $OUT $OUT_BMP
+
+verbose echo Finish

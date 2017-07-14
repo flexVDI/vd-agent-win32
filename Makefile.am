@@ -68,6 +68,26 @@ vdservice_rc.$(OBJEXT): vdservice/vdservice.rc
 
 MAINTAINERCLEANFILES += vdservice_rc.$(OBJEXT)
 
+check_PROGRAMS = imagetest
+
+imagetest_LDADD = $(LIBPNG_LIBS) $(ZLIB_LIBS) -lwtsapi32 -lgdi32
+imagetest_CXXFLAGS = $(AM_CXXFLAGS) $(LIBPNG_CFLAGS)
+imagetest_LDFLAGS = $(AM_LDFLAGS) -Wl,--subsystem,console
+imagetest_SOURCES =			\
+	common/vdcommon.cpp             \
+	common/vdcommon.h		\
+	common/vdlog.cpp		\
+	common/vdlog.h			\
+	vdagent/imagetest.cpp		\
+	vdagent/image.cpp		\
+	vdagent/image.h			\
+	vdagent/imagepng.cpp		\
+	vdagent/imagepng.h		\
+	$(NULL)
+
+TESTS = test-png
+EXTRA_DIST += test-png
+
 deps.txt:
 	$(AM_V_GEN)rpm -qa | grep $(host_os) | sort | unix2dos > $@
 
