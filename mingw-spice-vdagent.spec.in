@@ -2,6 +2,19 @@
 
 #define _version_suffix -e198
 
+%if "%{_build_arch}" == "x86_64" && (0%{?fedora} && 0%{?fedora} >= 24)
+    %define can_do_check_x64 1
+    %define can_do_check_x86 1
+%else
+%if "%{_build_arch}" == "x86_64" && (0%{?epel} && 0%{?epel} >= 7)
+    %define can_do_check_x64 1
+    %define can_do_check_x86 0
+%else
+    %define can_do_check_x64 0
+    %define can_do_check_x86 0
+%endif
+%endif
+
 Name:           mingw-spice-vdagent
 Version:        @VERSION@
 Release:        1%{?dist}%{?extra_release}
@@ -22,6 +35,12 @@ BuildRequires:  mingw64-zlib-static
 BuildRequires:  mingw32-winpthreads-static
 BuildRequires:  mingw64-winpthreads-static
 BuildRequires:  pkgconfig
+%if 0%{can_do_check_x64}
+BuildRequires:  ImageMagick wine-core(x86-64)
+%endif
+%if 0%{can_do_check_x86}
+BuildRequires:  ImageMagick wine-core(x86-32)
+%endif
 
 BuildArch:      noarch
 
@@ -73,6 +92,14 @@ Features:
 %mingw_configure --enable-debug
 %mingw_make %{?_smp_mflags} V=1
 
+%if 0%{can_do_check_x86} || 0%{can_do_check_x64}
+%check
+%define mingw_build_win32 %{can_do_check_x86}
+%define mingw_build_win64 %{can_do_check_x64}
+%mingw_make check
+%define mingw_build_win32 1
+%define mingw_build_win64 1
+%endif
 
 %install
 %mingw_make_install DESTDIR=$RPM_BUILD_ROOT
