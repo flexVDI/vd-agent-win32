@@ -306,19 +306,18 @@ VOID WINAPI VDService::main(DWORD argc, TCHAR* argv[])
 {
     VDService* s = new VDService;
     SERVICE_STATUS* status;
-    TCHAR full_path[MAX_PATH];
-    TCHAR temp_path[MAX_PATH];
+    TCHAR path[MAX_PATH];
     TCHAR* slash;
 
     ASSERT(s);
-    if (GetTempPath(MAX_PATH, temp_path)) {
+    if (GetTempPath(MAX_PATH, path)) {
         TCHAR log_path[MAX_PATH];
-        swprintf_s(log_path, MAX_PATH, VD_SERVICE_LOG_PATH, temp_path);
+        swprintf_s(log_path, MAX_PATH, VD_SERVICE_LOG_PATH, path);
         s->_log = VDLog::get(log_path);
     }
-    if (GetModuleFileName(NULL, full_path, MAX_PATH) && (slash = wcsrchr(full_path, TCHAR('\\')))) {
+    if (GetModuleFileName(NULL, path, MAX_PATH) && (slash = wcsrchr(path, TCHAR('\\')))) {
         *slash = TCHAR('\0');
-        swprintf_s(s->_agent_path, MAX_PATH, VD_AGENT_PATH, full_path);
+        swprintf_s(s->_agent_path, MAX_PATH, VD_AGENT_PATH, path);
     }
     vd_printf("***Service started***");
     log_version();
