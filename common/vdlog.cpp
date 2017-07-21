@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <share.h>
+#include <vector>
 
 #define LOG_ROLL_SIZE (1024 * 1024)
 
@@ -80,7 +81,6 @@ void log_version()
 {
     DWORD handle;
     TCHAR module_fname[MAX_PATH];
-    TCHAR* info_buf = NULL;
 
     try {
         if (!GetModuleFileName(NULL, module_fname, MAX_PATH)) {
@@ -90,13 +90,13 @@ void log_version()
         if (version_inf_size == 0) {
             throw;
         }
-        TCHAR* info_buf = new TCHAR[version_inf_size];
-        if (!GetFileVersionInfo(module_fname, handle, version_inf_size, info_buf)) {
+        std::vector<TCHAR> info_buf(version_inf_size);
+        if (!GetFileVersionInfo(module_fname, handle, version_inf_size, &info_buf[0])) {
             throw;
         }
         UINT size;
         VS_FIXEDFILEINFO* file_info;
-        if (!VerQueryValue(info_buf, L"\\", (VOID**)&file_info, &size) ||
+        if (!VerQueryValue(&info_buf[0], L"\\", (VOID**)&file_info, &size) ||
                 size < sizeof(VS_FIXEDFILEINFO)) {
             throw;
         }
@@ -108,5 +108,4 @@ void log_version()
     } catch (...) {
         vd_printf("get version info failed");
     }
-    delete[] info_buf;
 }
