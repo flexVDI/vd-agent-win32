@@ -15,6 +15,7 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "config.h"
 #include "vdcommon.h"
 #include "vdlog.h"
 #include <stdio.h>
@@ -79,33 +80,6 @@ void VDLog::printf(const char* format, ...)
 
 void log_version()
 {
-    DWORD handle;
-    TCHAR module_fname[MAX_PATH];
-
-    try {
-        if (!GetModuleFileName(NULL, module_fname, MAX_PATH)) {
-            throw;
-        }
-        DWORD version_inf_size = GetFileVersionInfoSize(module_fname, &handle);
-        if (version_inf_size == 0) {
-            throw;
-        }
-        std::vector<TCHAR> info_buf(version_inf_size);
-        if (!GetFileVersionInfo(module_fname, handle, version_inf_size, &info_buf[0])) {
-            throw;
-        }
-        UINT size;
-        VS_FIXEDFILEINFO* file_info;
-        if (!VerQueryValue(&info_buf[0], L"\\", (VOID**)&file_info, &size) ||
-                size < sizeof(VS_FIXEDFILEINFO)) {
-            throw;
-        }
-        vd_printf("%lu.%lu.%lu.%lu",
-            file_info->dwFileVersionMS >> 16,
-            file_info->dwFileVersionMS & 0x0ffff,
-            file_info->dwFileVersionLS >> 16,
-            file_info->dwFileVersionLS & 0x0ffff);
-    } catch (...) {
-        vd_printf("get version info failed");
-    }
+    // print same version as resource one
+    vd_printf("%u.%u.%u.%u", RC_PRODUCTVERSION);
 }
