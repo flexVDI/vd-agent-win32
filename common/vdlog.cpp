@@ -81,5 +81,7 @@ void VDLog::printf(const char* format, ...)
 void log_version()
 {
     // print same version as resource one
+    // RC_PRODUCTVERSION contains 4 numbers separated by commas (resource
+    // version information source format).
     vd_printf("%u.%u.%u.%u", RC_PRODUCTVERSION);
 }
