@@ -4,7 +4,6 @@ MAINTAINERCLEANFILES = mingw-spice-vdagent.spec
 
 DIST_SUBDIRS = spice-protocol
 
-AM_CXXFLAGS = -flto -fwhole-program
 AM_CPPFLAGS = 				\
 	-DUNICODE 			\
 	-D_UNICODE			\
