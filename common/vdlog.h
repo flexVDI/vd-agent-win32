@@ -31,7 +31,10 @@ class VDLog {
 public:
     ~VDLog();
     static VDLog* get(TCHAR* path = NULL);
-    void printf(const char* format, ...);
+#ifdef __GNUC__
+    __attribute__((__format__ (gnu_printf, 1, 2)))
+#endif
+    static void printf(const char* format, ...);
 
 private:
     VDLog(FILE* handle);
@@ -61,7 +64,6 @@ static const VDLogLevel log_level = LOG_INFO;
 
 #define LOG(type, format, ...) do {                                     \
     if (type >= log_level && type <= LOG_FATAL) {                       \
-        VDLog* log = VDLog::get();                                      \
         const char *type_as_char[] = { "DEBUG", "INFO", "WARN", "ERROR", "FATAL" }; \
         struct _timeb now;                                              \
         struct tm today;                                                \
@@ -69,11 +71,7 @@ static const VDLogLevel log_level = LOG_INFO;
         _ftime_s(&now);                                                 \
         localtime_s(&today, &now.time);                                 \
         strftime(datetime_str, 20, "%Y-%m-%d %H:%M:%S", &today);        \
-        if (log) {                                                      \
-            log->PRINT_LINE(type_as_char[type], format, datetime_str, now.millitm, ## __VA_ARGS__); \
-        } else {                                                        \
-            PRINT_LINE(type_as_char[type], format, datetime_str, now.millitm, ## __VA_ARGS__); \
-        }                                                               \
+        VDLog::PRINT_LINE(type_as_char[type], format, datetime_str, now.millitm, ## __VA_ARGS__); \
     }                                                                   \
 } while(0)
 

@@ -70,12 +70,13 @@ VDLog* VDLog::get(TCHAR* path)
 
 void VDLog::printf(const char* format, ...)
 {
+    FILE *fh = _log ? _log->_handle : stdout;
     va_list args;
 
     va_start(args, format);
-    vfprintf(_handle, format, args);
+    vfprintf(fh, format, args);
     va_end(args);
-    fflush(_handle);
+    fflush(fh);
 }
 
 void log_version()
