@@ -284,7 +284,8 @@ DWORD WINAPI VDService::control_handler(DWORD control, DWORD event_type, LPVOID 
         break;
     case SERVICE_CONTROL_SESSIONCHANGE: {
         DWORD session_id = ((WTSSESSION_NOTIFICATION*)event_data)->dwSessionId;
-        vd_printf("Session %lu %s", session_id, session_events[event_type]);
+        vd_printf("Session %lu %s", session_id,
+                  event_type < ARRAYSIZE(session_events) ? session_events[event_type]: "unknown");
         SetServiceStatus(s->_status_handle, &s->_status);
         if (event_type == WTS_CONSOLE_CONNECT) {
             s->_session_id = session_id;
