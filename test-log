@@ -1,0 +1,3 @@
+#!/bin/bash
+
+exec wine test-log-win.exe

@@ -87,6 +87,19 @@ imagetest_SOURCES =			\
 TESTS = test-png
 EXTRA_DIST += test-png
 
+check_PROGRAMS += test-log-win
+TESTS += test-log
+EXTRA_DIST += test-log
+
+test_log_win_LDFLAGS = $(AM_LDFLAGS) -Wl,--subsystem,console
+test_log_win_SOURCES =			\
+	common/vdcommon.cpp             \
+	common/vdcommon.h		\
+	common/vdlog.cpp		\
+	common/vdlog.h			\
+	common/test-log.cpp		\
+	$(NULL)
+
 deps.txt:
 	$(AM_V_GEN)rpm -qa | grep $(host_os) | sort | unix2dos > $@
 
