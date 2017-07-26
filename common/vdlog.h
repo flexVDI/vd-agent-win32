@@ -58,10 +58,6 @@ static const VDLogLevel log_level = LOG_DEBUG;
 static const VDLogLevel log_level = LOG_INFO;
 #endif
 
-#define PRINT_LINE(type, format, datetime, ms, ...)                     \
-    printf("%lu::%s::%s,%.3d::%s::" format "\n", GetCurrentThreadId(), type, datetime, ms, \
-           __FUNCTION__, ## __VA_ARGS__);
-
 #define LOG(type, format, ...) do {                                     \
     if (type >= log_level && type <= LOG_FATAL) {                       \
         const char *type_as_char[] = { "DEBUG", "INFO", "WARN", "ERROR", "FATAL" }; \
@@ -71,7 +67,10 @@ static const VDLogLevel log_level = LOG_INFO;
         _ftime_s(&now);                                                 \
         localtime_s(&today, &now.time);                                 \
         strftime(datetime_str, 20, "%Y-%m-%d %H:%M:%S", &today);        \
-        VDLog::PRINT_LINE(type_as_char[type], format, datetime_str, now.millitm, ## __VA_ARGS__); \
+        VDLog::printf("%lu::%s::%s,%.3d::%s::" format "\n",             \
+                      GetCurrentThreadId(), type_as_char[type],         \
+                      datetime_str, now.millitm,                        \
+                      __FUNCTION__, ## __VA_ARGS__);                    \
     }                                                                   \
 } while(0)
 
