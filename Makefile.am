@@ -142,6 +142,6 @@ BUILT_SOURCES = $(top_srcdir)/.version
 $(top_srcdir)/.version:
 	echo $(VERSION) > $@-t && mv $@-t $@
 
-
+MAINTAINERCLEANFILES += $(GITIGNORE_MAINTAINERCLEANFILES_TOPLEVEL)
 
 -include $(top_srcdir)/git.mk
