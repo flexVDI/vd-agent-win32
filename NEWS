@@ -1,3 +1,12 @@
+v0.9.0
+======
+- remove cximage dependency
+- remove 'RHEV' reference from service name
+- don't disconnect agent when client disconnects
+- support file transfer when file already exists
+- don't use LTO by default with mingw to work around a compiler bug
+- leak fixes
+
 v0.8.0
 ======
 - add multi monitor/dynamic resolution support on Win8+
